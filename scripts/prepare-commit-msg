@@ -1,0 +1,11 @@
+#!/bin/sh
+# Strip Co-authored-by lines from commit messages. Install: cp scripts/prepare-commit-msg .git/hooks/prepare-commit-msg && chmod +x .git/hooks/prepare-commit-msg
+
+msg_file="$1"
+[ -z "$msg_file" ] || [ ! -f "$msg_file" ] && exit 0
+
+# Remove Co-authored-by lines from commit messages
+tmp=$(mktemp)
+grep -v -i '^Co-authored-by:' "$msg_file" > "$tmp" && mv "$tmp" "$msg_file"
+rm -f "$tmp"
+exit 0

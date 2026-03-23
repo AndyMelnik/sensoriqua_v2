@@ -1,0 +1,22 @@
+# Secrets — never commit
+backend/.env
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# Local app state
+backend/sensoriqua_state.db
+backend/sensoriqua_state.db-*
+
+# Node / frontend build
+frontend/node_modules/
+frontend/dist/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/

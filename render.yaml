@@ -1,0 +1,26 @@
+# Render Blueprint: Sensoriqua 2 (single app = API + GUI)
+# https://docs.render.com/blueprint-spec
+# Frontend is built during deploy and copied to backend/static; one URL serves both API and GUI.
+
+services:
+  - type: web
+    name: sensoriqua
+    runtime: python
+    region: oregon
+
+    # Build frontend, copy to backend/static, then install backend deps
+    buildCommand: |
+      cd frontend && npm ci && npm run build
+      mkdir -p ../backend/static && cp -r dist/* ../backend/static/
+      cd ../backend && pip install -r requirements.txt
+    startCommand: cd backend && uvicorn app.main:app --host 0.0.0.0 --port $PORT
+
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11"
+      # Use SQLite for app state so configured_sensors/dashboard work without app_sensoriqua schema in Postgres
+      - key: SENSORIQUA_APP_STATE_DSN
+        value: "sqlite:///sensoriqua_state.db"
+      # Set in Render Dashboard → Environment (use Secret for JWT_SECRET):
+      # JWT_SECRET (required for Navixy) - min 32 chars; when set, data source is iotDbUrl from Navixy per user
+      # SENSORIQUA_DSN - optional; only for standalone mode without Navixy
