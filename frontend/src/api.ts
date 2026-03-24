@@ -93,7 +93,10 @@ export async function getConfig() {
   return r.json();
 }
 
-export async function getGroupings(type: 'groups' | 'tags' | 'departments' | 'garages' | 'sensor_types', search?: string) {
+export async function getGroupings(
+  type: 'groups' | 'tags' | 'departments' | 'garages' | 'sensor_types' | 'vehicles' | 'employees' | 'sensor_names',
+  search?: string
+) {
   const q = new URLSearchParams({ type });
   if (search) q.set('search', search);
   const r = await fetch(`${API_BASE}/api/groupings?${q}`, { headers: headers() });
@@ -107,6 +110,10 @@ export async function getObjects(filter: {
   department_ids?: number[];
   garage_ids?: number[];
   sensor_type_ids?: string[];
+  vehicle_ids?: number[];
+  employee_ids?: number[];
+  sensor_ids?: number[];
+  sensor_names?: string[];
   client_id?: number;
   include_grouping_info?: boolean;
 }) {
@@ -284,6 +291,26 @@ export async function getLatestValues(pairs: SparklinePair[]) {
     method: 'POST',
     headers: headers(),
     body: JSON.stringify({ pairs }),
+  });
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
+/** Distinct sensor_name (inputs) and state_name (states) for map conditions. */
+export async function getMapConditionFields(): Promise<{ inputs: string[]; states: string[] }> {
+  const r = await fetch(`${API_BASE}/api/map-condition-fields`, { headers: headers() });
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
+/** Latest lat/lon from same tracking_data_core row per device (one GPS fix). */
+export async function getMapPositions(deviceIds: number[]): Promise<{
+  positions: Record<string, { lat: number; lon: number; ts: string; speed: number | null }>;
+}> {
+  const r = await fetch(`${API_BASE}/api/map-positions`, {
+    method: 'POST',
+    headers: headers(),
+    body: JSON.stringify({ device_ids: deviceIds }),
   });
   if (!r.ok) throw new Error(await r.text());
   return r.json();

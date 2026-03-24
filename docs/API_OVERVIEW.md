@@ -18,9 +18,11 @@ Summary of the main HTTP API used by the frontend. Full OpenAPI spec is availabl
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | /api/config | Default DSN (masked) and default user_id. |
-| GET | /api/groupings | List groupings: `type` = groups \| tags \| departments \| garages \| sensor_types; optional `search`. |
-| POST | /api/objects | List objects; body: group_ids, tag_ids, department_ids, garage_ids, sensor_type_ids, client_id, include_grouping_info. |
+| GET | /api/groupings | List groupings: `type` = groups \| tags \| departments \| garages \| sensor_types \| **vehicles** \| **employees** \| **sensor_names**; optional `search`. |
+| POST | /api/objects | List objects; body: group_ids, tag_ids, department_ids, garage_ids, sensor_type_ids, **vehicle_ids**, **employee_ids**, **sensor_ids**, client_id, include_grouping_info. |
 | GET | /api/objects/{id}/sensors | Sensors for one object; optional search, include_type_and_params. |
+
+**Map / business mapping:** `vehicles` lists fleet rows (`vehicles.object_id` → objects). `employees` lists staff with an object assignment. `sensor_names` lists distinct `sensor_description` rows (`sensor_id` + label). Object filters use `vehicle_ids` / `employee_ids` / `sensor_ids` via EXISTS joins on `vehicles`, `employees`, and `sensor_description` respectively.
 | GET | /api/configured-sensors | List configured sensors for current user. |
 | POST | /api/configured-sensors | Create; body: object_id, device_id, sensor_input_label, sensor_source, sensor_label_custom, min_threshold, max_threshold, multiplier. |
 | PATCH | /api/configured-sensors/{id} | Update; body: sensor_label_custom, min_threshold, max_threshold, multiplier. |
@@ -31,6 +33,8 @@ Summary of the main HTTP API used by the frontend. Full OpenAPI spec is availabl
 | PATCH | /api/dashboard-planes/order | Reorder; body: order = [ { dashboard_plane_id, position_index }, ... ]. |
 | POST | /api/sparklines | Body: pairs = [ { device_id, sensor_input_label, sensor_source? } ]. Returns series keyed by "device_id:source:label". |
 | POST | /api/latest-values | Body: pairs (same shape). Returns values keyed by "device_id:source:label". |
+| GET | /api/map-condition-fields | Distinct **sensor_name** from `raw_telematics_data.inputs` and **state_name** from `raw_telematics_data.states` (for map condition pickers). |
+| POST | /api/map-positions | Body: `{ "device_ids": [ 1, 2, 3 ] }`. Returns latest **lat, lon, ts, speed** per device from the **last row** in `tracking_data_core` (ORDER BY device_time DESC), so lat and lon come from the same GPS fix. |
 | POST | /api/sensor-history | Body: device_id, sensor_input_label, sensor_source?, hours? (1\|4\|12\|24), from_ts?, to_ts?, raw? (unresampled). Returns { series: [ { ts, value }, ... ] }. |
 
 ---

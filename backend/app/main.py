@@ -112,6 +112,10 @@ class ObjectsFilter(BaseModel):
     department_ids: list[int] = []
     garage_ids: list[int] = []
     sensor_type_ids: list[str] = []  # e.g. ["state", "tracking"] or sensor_type from sensor_description
+    vehicle_ids: list[int] = []  # objects linked via vehicles.object_id
+    employee_ids: list[int] = []  # objects linked via employees.object_id
+    sensor_ids: list[int] = []  # objects whose device has sensor_description.sensor_id
+    sensor_names: list[str] = []  # objects whose device has sensor_name in raw_telematics_data.inputs
     client_id: int | None = None  # optional tenant scope
     include_grouping_info: bool = False  # return group_label, tag_labels, department_label for UI grouping
 
@@ -263,7 +267,10 @@ def get_config(ctx: RequestContext = Depends(_request_context)):
 
 @app.get("/api/groupings")
 def list_groupings(
-    type: str = Query(..., description="groups | tags | departments | garages | sensor_types"),
+    type: str = Query(
+        ...,
+        description="groups | tags | departments | garages | sensor_types | vehicles | employees | sensor_names",
+    ),
     search: str | None = Query(None),
     ctx: RequestContext = Depends(_request_context),
 ):
@@ -333,8 +340,107 @@ def list_groupings(
                 q += " AND organization_label ILIKE %(search)s"
             q += " ORDER BY label"
             cur = conn.execute(q, {"search": f"%{search}%" if search else None})
+        elif type == "vehicles":
+            # Fleet assets: vehicles.object_id -> objects; label from common column names if present
+            rows = []
+            try:
+                cur = conn.execute(
+                    f"""
+                    SELECT v.vehicle_id AS id,
+                           COALESCE(
+                               NULLIF(TRIM(COALESCE(v.registration_number::text, v.vehicle_label::text, v.name::text, '')), ''),
+                               'Vehicle ' || v.vehicle_id::text
+                           ) AS label
+                    FROM {schema}.vehicles v
+                    WHERE v.object_id IS NOT NULL
+                    ORDER BY label
+                    """
+                )
+                rows = cur.fetchall()
+            except Exception:
+                try:
+                    cur = conn.execute(
+                        f"""
+                        SELECT vehicle_id AS id, 'Vehicle ' || vehicle_id::text AS label
+                        FROM {schema}.vehicles
+                        WHERE object_id IS NOT NULL
+                        ORDER BY vehicle_id
+                        """
+                    )
+                    rows = cur.fetchall()
+                except Exception:
+                    rows = []
+            if search and rows:
+                s = search.lower()
+                rows = [r for r in rows if s in str(r.get("label") or "").lower()]
+            return [dict(r) for r in rows]
+        elif type == "employees":
+            rows = []
+            try:
+                cur = conn.execute(
+                    f"""
+                    SELECT e.employee_id AS id,
+                           COALESCE(
+                               NULLIF(TRIM(
+                                   COALESCE(
+                                       NULLIF(TRIM(e.full_name::text), ''),
+                                       NULLIF(TRIM(CONCAT_WS(' ', e.first_name, e.last_name)), ''),
+                                       NULLIF(TRIM(e.employee_name::text), ''),
+                                       ''
+                                   )
+                               ), ''),
+                               'Employee ' || e.employee_id::text
+                           ) AS label
+                    FROM {schema}.employees e
+                    WHERE e.object_id IS NOT NULL
+                    ORDER BY label
+                    """
+                )
+                rows = cur.fetchall()
+            except Exception:
+                try:
+                    cur = conn.execute(
+                        f"""
+                        SELECT employee_id AS id, 'Employee ' || employee_id::text AS label
+                        FROM {schema}.employees
+                        WHERE object_id IS NOT NULL
+                        ORDER BY employee_id
+                        """
+                    )
+                    rows = cur.fetchall()
+                except Exception:
+                    rows = []
+            if search and rows:
+                s = search.lower()
+                rows = [r for r in rows if s in str(r.get("label") or "").lower()]
+            return [dict(r) for r in rows]
+        elif type == "sensor_names":
+            # All distinct sensor_name from raw_telematics_data.inputs
+            out_sn: list[dict[str, Any]] = []
+            try:
+                cur = conn.execute(
+                    f"""
+                    SELECT DISTINCT i.sensor_name
+                    FROM {schema_tel}.inputs i
+                    WHERE i.sensor_name IS NOT NULL AND TRIM(i.sensor_name) != ''
+                    ORDER BY i.sensor_name
+                    """
+                )
+                for r in cur.fetchall():
+                    name = str(r["sensor_name"]).strip()
+                    if name:
+                        out_sn.append({"id": name, "label": name})
+            except Exception:
+                pass
+            if search:
+                s = search.lower()
+                out_sn = [x for x in out_sn if s in str(x.get("label") or "").lower()]
+            return out_sn
         else:
-            raise HTTPException(400, "type must be groups|tags|departments|garages|sensor_types")
+            raise HTTPException(
+                400,
+                "type must be groups|tags|departments|garages|sensor_types|vehicles|employees|sensor_names",
+            )
         rows = cur.fetchall()
     return [dict(r) for r in rows]
 
@@ -352,23 +458,48 @@ def list_objects(
     """
     dsn = ctx.dsn
     schema = "raw_business_data"
+    schema_tel = "raw_telematics_data"
     conditions = []
     params: dict[str, Any] = {}
     if body.group_ids:
         conditions.append("o.group_id = ANY(%(group_ids)s)")
         params["group_ids"] = body.group_ids
     if body.tag_ids:
+        # Deep tag resolution: tag_links(tag_id, entity_type, entity_id) -> resolve to object_id -> objects.device_id
+        # Handles: object (direct), vehicle (via vehicles.object_id), employee (via employees.object_id)
         entity_type_object = int(os.environ.get("SENSORIQUA_TAG_ENTITY_TYPE_OBJECT", "1"))
-        conditions.append("""
+        entity_type_vehicle = os.environ.get("SENSORIQUA_TAG_ENTITY_TYPE_VEHICLE", "2").strip()
+        entity_type_employee = os.environ.get("SENSORIQUA_TAG_ENTITY_TYPE_EMPLOYEE", "3").strip()
+        tag_conds = [
+            "(tl.entity_type = %(tag_entity_type_object)s AND tl.entity_id = o.object_id)"
+        ]
+        params["tag_entity_type_object"] = entity_type_object
+        params["tag_ids"] = body.tag_ids
+        ve_joins = ""
+        if entity_type_vehicle:
+            tag_conds.append(
+                "(tl.entity_type = %(tag_entity_type_vehicle)s AND tl.entity_id = v_tag.vehicle_id AND v_tag.object_id = o.object_id)"
+            )
+            params["tag_entity_type_vehicle"] = int(entity_type_vehicle)
+            ve_joins += f"""
+                LEFT JOIN {schema}.vehicles v_tag ON tl.entity_type = %(tag_entity_type_vehicle)s AND tl.entity_id = v_tag.vehicle_id
+            """
+        if entity_type_employee:
+            tag_conds.append(
+                "(tl.entity_type = %(tag_entity_type_employee)s AND tl.entity_id = e_tag.employee_id AND e_tag.object_id = o.object_id)"
+            )
+            params["tag_entity_type_employee"] = int(entity_type_employee)
+            ve_joins += f"""
+                LEFT JOIN {schema}.employees e_tag ON tl.entity_type = %(tag_entity_type_employee)s AND tl.entity_id = e_tag.employee_id
+            """
+        conditions.append(f"""
             EXISTS (
                 SELECT 1 FROM raw_business_data.tag_links tl
-                WHERE tl.entity_id = o.object_id
-                  AND tl.entity_type = %(tag_entity_type)s
-                  AND tl.tag_id = ANY(%(tag_ids)s)
+                {ve_joins}
+                WHERE tl.tag_id = ANY(%(tag_ids)s)
+                  AND ({' OR '.join(tag_conds)})
             )
         """)
-        params["tag_entity_type"] = entity_type_object
-        params["tag_ids"] = body.tag_ids
     if body.department_ids:
         conditions.append("""
             EXISTS (
@@ -387,6 +518,42 @@ def list_objects(
             )
         """)
         params["garage_ids"] = body.garage_ids
+    if body.vehicle_ids:
+        conditions.append("""
+            EXISTS (
+                SELECT 1 FROM raw_business_data.vehicles v
+                WHERE v.object_id = o.object_id
+                  AND v.vehicle_id = ANY(%(vehicle_ids)s)
+            )
+        """)
+        params["vehicle_ids"] = body.vehicle_ids
+    if body.employee_ids:
+        conditions.append("""
+            EXISTS (
+                SELECT 1 FROM raw_business_data.employees e
+                WHERE e.object_id = o.object_id
+                  AND e.employee_id = ANY(%(employee_ids)s)
+            )
+        """)
+        params["employee_ids"] = body.employee_ids
+    if body.sensor_ids:
+        conditions.append("""
+            EXISTS (
+                SELECT 1 FROM raw_business_data.sensor_description sd
+                WHERE sd.device_id = o.device_id
+                  AND sd.sensor_id = ANY(%(sensor_ids)s)
+            )
+        """)
+        params["sensor_ids"] = body.sensor_ids
+    if body.sensor_names:
+        conditions.append("""
+            EXISTS (
+                SELECT 1 FROM raw_telematics_data.inputs i
+                WHERE i.device_id = o.device_id
+                  AND i.sensor_name = ANY(%(sensor_names)s)
+            )
+        """)
+        params["sensor_names"] = body.sensor_names
 
     if body.sensor_type_ids:
         # Objects whose device has at least one sensor of any of the selected types
@@ -420,7 +587,17 @@ def list_objects(
                      WHERE tl.entity_id = o.object_id AND tl.entity_type = %(_tag_entity_type)s) AS tag_labels,
                     (SELECT d.department_label FROM {schema}.employees e
                      JOIN {schema}.departments d ON d.department_id = e.department_id
-                     WHERE e.object_id = o.object_id LIMIT 1) AS department_label"""
+                     WHERE e.object_id = o.object_id LIMIT 1) AS department_label,
+                    (SELECT COALESCE(NULLIF(TRIM(v.registration_number::text), ''),
+                       NULLIF(TRIM(v.vehicle_label::text), ''),
+                       NULLIF(TRIM(v.name::text), ''),
+                       'Vehicle ' || v.vehicle_id::text)
+                     FROM {schema}.vehicles v WHERE v.object_id = o.object_id LIMIT 1) AS vehicle_label,
+                    (SELECT COALESCE(NULLIF(TRIM(e.full_name::text), ''),
+                       NULLIF(TRIM(CONCAT_WS(' ', e.first_name, e.last_name)), ''),
+                       NULLIF(TRIM(e.employee_name::text), ''),
+                       'Employee ' || e.employee_id::text)
+                     FROM {schema}.employees e WHERE e.object_id = o.object_id LIMIT 1) AS employee_label"""
                 joins = f"LEFT JOIN {schema}.groups g ON g.group_id = o.group_id"
                 if not conditions:
                     where = "o.is_deleted = false"
@@ -513,6 +690,8 @@ def list_objects(
             row["group_label"] = None
             row["tag_labels"] = []
             row["department_label"] = None
+            row["vehicle_label"] = None
+            row["employee_label"] = None
             out.append(row)
     return out
 
@@ -1283,6 +1462,100 @@ def reorder_dashboard_planes(
     return {"ok": True}
 
 
+# ---------- Map condition fields (distinct telematics names for filter UI) ----------
+
+@app.get("/api/map-condition-fields")
+def map_condition_fields(ctx: RequestContext = Depends(_request_context)):
+    """Distinct sensor_name from inputs and state_name from states (raw_telematics_data)."""
+    schema_tel = "raw_telematics_data"
+    dsn = ctx.dsn
+    inputs: list[str] = []
+    states: list[str] = []
+    try:
+        with get_conn(dsn) as conn:
+            cur = conn.execute(
+                f"""
+                SELECT DISTINCT i.sensor_name AS n
+                FROM {schema_tel}.inputs i
+                WHERE i.sensor_name IS NOT NULL AND TRIM(i.sensor_name::text) != ''
+                ORDER BY i.sensor_name
+                """
+            )
+            inputs = [str(r["n"]).strip() for r in cur.fetchall() if r.get("n")]
+            cur = conn.execute(
+                f"""
+                SELECT DISTINCT s.state_name AS n
+                FROM {schema_tel}.states s
+                WHERE s.state_name IS NOT NULL AND TRIM(s.state_name::text) != ''
+                ORDER BY s.state_name
+                """
+            )
+            states = [str(r["n"]).strip() for r in cur.fetchall() if r.get("n")]
+    except Exception:
+        pass
+    return {"inputs": inputs, "states": states}
+
+
+# ---------- Map positions (latest lat/lon from same tracking row per device) ----------
+
+@app.post("/api/map-positions")
+def batch_map_positions(
+    body: dict[str, Any],
+    ctx: RequestContext = Depends(_request_context),
+):
+    """Body: { "device_ids": [ 1, 2, 3 ] }
+    Returns: { "positions": { "device_id": { "lat", "lon", "ts", "speed" }, ... } }
+    Uses the LAST row per device_id from tracking_data_core (ORDER BY device_time DESC) so lat and lon
+    come from the same GPS fix.
+    """
+    device_ids = body.get("device_ids") or []
+    if not device_ids:
+        return {"positions": {}}
+    ids = [int(x) for x in device_ids if x is not None]
+    if not ids:
+        return {"positions": {}}
+    dsn = ctx.dsn
+    positions: dict[str, dict] = {}
+    try:
+        with get_conn(dsn) as conn:
+            placeholders = ",".join(["%s"] * len(ids))
+            # Lat/lon stored as integer × 10^7 (degrees × 10^7) — convert to decimal degrees
+            cur = conn.execute(
+                f"""
+                SELECT DISTINCT ON (t.device_id)
+                    t.device_id,
+                    t.device_time AS ts,
+                    ((t.latitude)::numeric / 10000000) AS lat,
+                    ((t.longitude)::numeric / 10000000) AS lon,
+                    (t.speed)::numeric AS speed
+                FROM raw_telematics_data.tracking_data_core t
+                WHERE t.device_id IN ({placeholders})
+                  AND t.latitude IS NOT NULL
+                  AND t.longitude IS NOT NULL
+                ORDER BY t.device_id, t.device_time DESC
+                """,
+                ids,
+            )
+            for r in cur.fetchall():
+                dev_id = r["device_id"]
+                lat = r.get("lat")
+                lon = r.get("lon")
+                if lat is not None and lon is not None:
+                    key = str(dev_id)
+                    sp = r.get("speed")
+                    # speed stored as × 10^2; convert to human-readable
+                    speed_val = float(sp) / 100.0 if sp is not None else None
+                    positions[key] = {
+                        "lat": float(lat),
+                        "lon": float(lon),
+                        "ts": r["ts"].isoformat() if hasattr(r["ts"], "isoformat") else str(r["ts"]),
+                        "speed": speed_val,
+                    }
+    except Exception:
+        pass
+    return {"positions": positions}
+
+
 # ---------- Latest value (for dashboard indicators) ----------
 
 @app.post("/api/latest-values")
@@ -1363,7 +1636,11 @@ def batch_latest_values(
                 r = cur.fetchone()
                 if r:
                     key = _series_key(r["device_id"], col, "tracking")
-                    values[key] = {"value": float(r["value"]) if r["value"] is not None else None, "ts": r["ts"].isoformat() if hasattr(r["ts"], "isoformat") else str(r["ts"])}
+                    raw_val = float(r["value"]) if r["value"] is not None else None
+                    # speed stored as × 10^2; convert to human-readable
+                    if col == "speed" and raw_val is not None:
+                        raw_val = raw_val / 100.0
+                    values[key] = {"value": raw_val, "ts": r["ts"].isoformat() if hasattr(r["ts"], "isoformat") else str(r["ts"])}
     return {"values": values}
 
 

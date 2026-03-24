@@ -19,6 +19,8 @@ Set these in **`backend/.env`** (never commit this file). Copy from **`backend/.
 | **SENSORIQUA_APP_STATE_DSN** | Optional. App state database: PostgreSQL URL or SQLite (e.g. `sqlite:///./sensoriqua_state.db`). If not set, backend uses SQLite at `sensoriqua_state.db` when not using Navixy. |
 | **SENSORIQUA_SQLITE_TIMEOUT** | Seconds to wait for SQLite lock (default `10`). Used for app state SQLite. |
 | **SENSORIQUA_TAG_ENTITY_TYPE_OBJECT** | Integer entity type for object/tracker in `tag_links` (default `1`). |
+| **SENSORIQUA_TAG_ENTITY_TYPE_VEHICLE** | Optional. Entity type for vehicle in `tag_links`. When set (default `2`), tags on vehicles resolve via `vehicles.object_id` to include those objects. Set empty to disable. |
+| **SENSORIQUA_TAG_ENTITY_TYPE_EMPLOYEE** | Optional. Entity type for employee in `tag_links`. When set (default `3`), tags on employees resolve via `employees.object_id`. Set empty to disable. |
 
 ---
 

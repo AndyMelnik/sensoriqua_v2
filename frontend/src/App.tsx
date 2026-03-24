@@ -6,9 +6,10 @@ import { ConfigModal, type ConfigForm } from './ConfigModal';
 import { AccordionStep } from './AccordionStep';
 import { ReportChart, type ReportSeries } from './ReportChart';
 import { ReportTable } from './ReportTable';
+import { MapTab } from './MapTab';
 import './App.css';
 
-type MainTab = 'dashboards' | 'reports';
+type MainTab = 'dashboards' | 'reports' | 'map';
 type GroupingType = 'groups' | 'tags' | 'sensor_types';
 
 type GroupingItem = { id: number | string; label: string };
@@ -1487,9 +1488,9 @@ export default function App() {
     <div className={`app${dashboardExpanded ? ' app-dashboard-expanded' : ''}`}>
       <header className="top-bar">
         <div className="top-bar-brand">
-          <div className="top-bar-title">Sensoriqua 2 (Dashboard and Report)</div>
+          <div className="top-bar-title">Sensoriqua 2 (Dashboard, Report, Map)</div>
           <p className="top-bar-tagline">
-            Dashboard for monitoring sensors in real time · Report from sensor readings
+            Dashboard for monitoring sensors in real time · Reports from sensor readings · Map for live unit positions
             {useLocalConfig && (
               <span className="top-bar-local-hint" title="Configured sensors and dashboard are stored in this browser (localStorage)"> · Saved in this browser</span>
             )}
@@ -1510,6 +1511,14 @@ export default function App() {
               aria-current={activeTab === 'reports' ? 'true' : undefined}
             >
               Report
+            </button>
+            <button
+              type="button"
+              className={`app-tab${activeTab === 'map' ? ' active' : ''}`}
+              onClick={() => setActiveTab('map')}
+              aria-current={activeTab === 'map' ? 'true' : undefined}
+            >
+              Map
             </button>
           </nav>
         </div>
@@ -2366,6 +2375,8 @@ export default function App() {
         </div>
       </div>
       )}
+
+      {activeTab === 'map' && <MapTab />}
 
       {historyPlane && (
         <div className="modal-overlay" onClick={() => setHistoryPlane(null)}>
