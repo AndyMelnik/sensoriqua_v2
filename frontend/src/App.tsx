@@ -7,6 +7,12 @@ import { AccordionStep } from './AccordionStep';
 import { ReportChart, type ReportSeries } from './ReportChart';
 import { ReportTable } from './ReportTable';
 import { MapTab } from './MapTab';
+import {
+  buildFullReportHtml,
+  downloadReportHtml,
+  downloadReportPdf,
+  type FullReportExportInput,
+} from './reportExport';
 import './App.css';
 
 type MainTab = 'dashboards' | 'reports' | 'map';
@@ -41,9 +47,16 @@ type ConfiguredSensor = {
   min_threshold: number | null;
   max_threshold: number | null;
   multiplier?: number | null;
+  sparkline_hours?: api.SparklineHours;
   object_label: string;
   created_at?: string;
 };
+
+function normalizeSparklineHours(h: unknown): api.SparklineHours {
+  const n = typeof h === 'number' ? h : 1;
+  if (n === 2 || n === 4 || n === 8) return n;
+  return 1;
+}
 type DashboardPlane = {
   dashboard_plane_id: number;
   configured_sensor_id: number;
@@ -139,6 +152,7 @@ export default function App() {
   });
   const [reportDateTo, setReportDateTo] = useState(() => new Date().toISOString().slice(0, 16));
   const [reportLoading, setReportLoading] = useState(false);
+  const [reportPdfExporting, setReportPdfExporting] = useState(false);
   const [reportData, setReportData] = useState<{
     chartSeries: ReportSeries[];
     tableRows: { ts: string; [key: string]: string | number | null }[];
@@ -369,6 +383,7 @@ export default function App() {
         device_id: c.device_id,
         sensor_input_label: c.sensor_input_label,
         sensor_source: (c.sensor_source as 'input' | 'state' | 'tracking') || 'input',
+        hours: normalizeSparklineHours(c.sparkline_hours),
       }));
       const res = await api.getSparklines(pairs);
       setSparklineData(res.series || {});
@@ -488,6 +503,7 @@ export default function App() {
       min_threshold: '',
       max_threshold: '',
       multiplier: '',
+      sparkline_hours: 1,
     });
   };
 
@@ -504,6 +520,7 @@ export default function App() {
       min_threshold: c.min_threshold != null ? String(c.min_threshold) : '',
       max_threshold: c.max_threshold != null ? String(c.max_threshold) : '',
       multiplier: c.multiplier != null ? String(c.multiplier) : '',
+      sparkline_hours: normalizeSparklineHours(c.sparkline_hours),
     });
   };
 
@@ -514,13 +531,14 @@ export default function App() {
     const maxVal = form.max_threshold.trim() ? parseFloat(form.max_threshold) : null;
     const multVal = form.multiplier.trim() ? parseFloat(form.multiplier) : null;
     const source = (form.sensor_source as 'input' | 'state' | 'tracking') || 'input';
+    const sparklineHours = form.sparkline_hours;
 
     if (useLocalConfig) {
       const list = api.getLocalConfiguredSensors() as ConfiguredSensor[];
       if (editingConfigId) {
         const out = list.map((c) =>
           c.configured_sensor_id === editingConfigId
-            ? { ...c, sensor_label_custom: form.sensor_label_custom, min_threshold: minVal, max_threshold: maxVal, multiplier: multVal }
+            ? { ...c, sensor_label_custom: form.sensor_label_custom, min_threshold: minVal, max_threshold: maxVal, multiplier: multVal, sparkline_hours: sparklineHours }
             : c
         );
         api.setLocalConfiguredSensors(out);
@@ -536,6 +554,7 @@ export default function App() {
           min_threshold: minVal,
           max_threshold: maxVal,
           multiplier: multVal,
+          sparkline_hours: sparklineHours,
           object_label: form.object_label,
         });
         api.setLocalConfiguredSensors(list);
@@ -564,6 +583,7 @@ export default function App() {
           min_threshold: minVal,
           max_threshold: maxVal,
           multiplier: multVal,
+          sparkline_hours: sparklineHours,
         });
       } else {
         await api.addConfiguredSensor({
@@ -575,6 +595,7 @@ export default function App() {
           min_threshold: minVal,
           max_threshold: maxVal,
           multiplier: multVal,
+          sparkline_hours: sparklineHours,
         });
       }
       setConfigModal(null);
@@ -590,7 +611,7 @@ export default function App() {
         if (editingConfigId) {
           const out = list.map((c) =>
             c.configured_sensor_id === editingConfigId
-              ? { ...c, sensor_label_custom: form.sensor_label_custom, min_threshold: minVal, max_threshold: maxVal, multiplier: multVal }
+              ? { ...c, sensor_label_custom: form.sensor_label_custom, min_threshold: minVal, max_threshold: maxVal, multiplier: multVal, sparkline_hours: sparklineHours }
               : c
           );
           api.setLocalConfiguredSensors(out);
@@ -605,6 +626,7 @@ export default function App() {
             min_threshold: minVal,
             max_threshold: maxVal,
             multiplier: multVal,
+            sparkline_hours: sparklineHours,
             object_label: form.object_label,
           });
           api.setLocalConfiguredSensors(list);
@@ -983,67 +1005,43 @@ export default function App() {
     }
   }, [selectedObjectIds, selectedSensorsByObject, objects, reportDateFrom, reportDateTo]);
 
-  const exportFullReportHtml = useCallback(() => {
-    if (!reportData) return;
+  const buildCurrentReportExport = useCallback((): FullReportExportInput | null => {
+    if (!reportData) return null;
     const chartSvg = reportChartContainerRef.current?.querySelector('.report-chart-svg')?.outerHTML ?? '';
-    const escapeHtml = (s: string) =>
-      String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-    const rawRows = reportData.tableRows
-      .map((row) => `<tr>${reportData.columns.map((col) => `<td>${escapeHtml(String(row[col.key] ?? ''))}</td>`).join('')}</tr>`)
-      .join('');
-    const rawHeader = `<thead><tr>${reportData.columns.map((c) => `<th>${escapeHtml(c.label)}</th>`).join('')}</tr></thead>`;
-    const summaryRows = reportData.summaryRows
-      .map((row) => `<tr>${reportData.summaryColumns.map((col) => `<td>${escapeHtml(String(row[col.key] ?? ''))}</td>`).join('')}</tr>`)
-      .join('');
-    const summaryHeader = `<thead><tr>${reportData.summaryColumns.map((c) => `<th>${escapeHtml(c.label)}</th>`).join('')}</tr></thead>`;
-    const legendItems = reportData.chartSeries.map((s) => ({
-      label: s.label,
-      color: s.color,
-    }));
-    const html = `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <title>Sensoriqua Report</title>
-  <style>
-    @page { size: A4 landscape; margin: 1.2cm; }
-    html, body { margin: 0; padding: 0; }
-    body { font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: transparent; color: #0f172a; padding: 0.75rem 1rem; }
-    h1 { font-size: 1.25rem; margin: 0 0 0.4rem; }
-    h2 { font-size: 1.05rem; margin: 1.25rem 0 0.4rem; }
-    .chart-wrap { margin-bottom: 0.5rem; overflow: visible; }
-    .chart-wrap svg { width: 100%; height: auto; max-height: 9cm; }
-    .chart-legend { display: flex; flex-wrap: wrap; gap: 0.4rem 0.9rem; margin: 0.35rem 0 0; padding: 0; list-style: none; font-size: 0.8rem; }
-    .chart-legend-item { display: inline-flex; align-items: center; gap: 0.35rem; }
-    .chart-legend-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
-    table { width: 100%; border-collapse: collapse; font-size: 0.8rem; margin-bottom: 0.9rem; }
-    th, td { padding: 0.35rem 0.5rem; text-align: left; border-bottom: 1px solid #d1d5db; }
-    th { background: #f3f4f6; color: #374151; }
-    .meta { font-size: 0.8rem; color: #4b5563; margin-bottom: 0.6rem; }
-  </style>
-</head>
-<body>
-  <h1>Sensor reading report</h1>
-  <p class="meta">Exported ${new Date().toLocaleString()}</p>
-  <h2>Graph</h2>
-  <div class="chart-wrap">${chartSvg}</div>
-  ${legendItems.length ? `<ul class="chart-legend">${legendItems
-    .map((item) => `<li class="chart-legend-item"><span class="chart-legend-dot" style="background:${item.color}"></span><span>${escapeHtml(item.label)}</span></li>`)
-    .join('')}</ul>` : ''}
-  <h2>Raw data</h2>
-  <table>${rawHeader}<tbody>${rawRows}</tbody></table>
-  <h2>Summary</h2>
-  <table>${summaryHeader}<tbody>${summaryRows}</tbody></table>
-</body>
-</html>`;
-    const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `sensoriqua-report-${new Date().toISOString().slice(0, 10)}.html`;
-    a.click();
-    URL.revokeObjectURL(url);
+    return {
+      chartSvg,
+      legendItems: reportData.chartSeries.map((s) => ({ label: s.label, color: s.color })),
+      columns: reportData.columns,
+      tableRows: reportData.tableRows,
+      summaryColumns: reportData.summaryColumns,
+      summaryRows: reportData.summaryRows,
+    };
   }, [reportData]);
+
+  const buildCurrentReportHtml = useCallback(() => {
+    const input = buildCurrentReportExport();
+    return input ? buildFullReportHtml(input) : null;
+  }, [buildCurrentReportExport]);
+
+  const exportFullReportHtml = useCallback(() => {
+    const html = buildCurrentReportHtml();
+    if (!html) return;
+    downloadReportHtml(html);
+  }, [buildCurrentReportHtml]);
+
+  const exportFullReportPdf = useCallback(async () => {
+    const input = buildCurrentReportExport();
+    if (!input) return;
+    setError(null);
+    setReportPdfExporting(true);
+    try {
+      await downloadReportPdf(input);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'PDF export failed');
+    } finally {
+      setReportPdfExporting(false);
+    }
+  }, [buildCurrentReportExport]);
 
   const cancelReport = () => {
     if (reportAbortRef.current) {
@@ -1328,6 +1326,7 @@ export default function App() {
                 min_threshold: null,
                 max_threshold: null,
                 multiplier: null,
+                sparkline_hours: 1,
                 object_label: objectLabel,
               };
               currentConfigured = [...currentConfigured, newC];
@@ -1342,6 +1341,7 @@ export default function App() {
                 min_threshold: null,
                 max_threshold: null,
                 multiplier: null,
+                sparkline_hours: 1,
               });
             }
           }
@@ -1840,8 +1840,8 @@ export default function App() {
                       <div className="spark-wrap">
                         <Sparkline
                           data={data}
-                          width={100}
-                          height={24}
+                          width={192}
+                          chartHeight={30}
                           showThresholds
                           min={c.min_threshold}
                           max={c.max_threshold}
@@ -2004,9 +2004,17 @@ export default function App() {
                     <div className="plane-value">
                       {val != null ? val.toLocaleString(undefined, { maximumFractionDigits: 4 }) : '—'}
                     </div>
-                    <div className="plane-ts">{latest?.ts ? new Date(latest.ts).toLocaleString() : '—'}</div>
                     <div className="plane-spark">
-                      <Sparkline data={data} width={160} height={36} showThresholds min={p.min_threshold} max={p.max_threshold} stroke={ok ? '#22c55e' : '#ef4444'} />
+                      <Sparkline
+                        data={data}
+                        width={192}
+                        chartHeight={34}
+                        showThresholds
+                        min={p.min_threshold}
+                        max={p.max_threshold}
+                        stroke={ok ? '#22c55e' : '#ef4444'}
+                        showLastStat={false}
+                      />
                     </div>
                   </div>
                 );
@@ -2323,9 +2331,26 @@ export default function App() {
                 <div className="reports-placeholder-block reports-chart-block">
                   <div className="report-chart-block-header">
                     <h3>Graph</h3>
-                    <button type="button" className="btn-sm primary" onClick={exportFullReportHtml} aria-label="Export full report to HTML">
-                      Export HTML
-                    </button>
+                    <div className="report-export-buttons">
+                      <button
+                        type="button"
+                        className="btn-sm primary"
+                        onClick={exportFullReportHtml}
+                        disabled={reportPdfExporting}
+                        aria-label="Export full report to HTML"
+                      >
+                        Export HTML
+                      </button>
+                      <button
+                        type="button"
+                        className="btn-sm"
+                        onClick={() => void exportFullReportPdf()}
+                        disabled={reportPdfExporting}
+                        aria-label="Export full report to PDF"
+                      >
+                        {reportPdfExporting ? 'Exporting PDF…' : 'Export PDF'}
+                      </button>
+                    </div>
                   </div>
                   <div ref={reportChartContainerRef} className="report-chart-resize-wrap">
                     <ReportChart

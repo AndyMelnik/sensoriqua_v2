@@ -843,6 +843,13 @@ body {
   margin: 0;
 }
 
+.report-export-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+}
+
 .report-chart-resize-wrap {
   width: 100%;
   min-height: 280px;
@@ -1423,8 +1430,134 @@ body {
 }
 
 .spark-wrap {
-  margin: 0.2rem 0;
-  min-height: 24px;
+  margin: 0.15rem 0 0;
+  min-width: 0;
+}
+
+.sparkline-block {
+  min-width: 0;
+}
+
+.sparkline-body {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+.sparkline-chart-column {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.12rem;
+  min-width: 0;
+}
+
+.sparkline-legend {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.12rem;
+  flex-shrink: 0;
+  font-size: 0.62rem;
+  line-height: 1.25;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.sparkline-threshold-tag {
+  letter-spacing: 0.02em;
+}
+
+.sparkline-threshold-min::before {
+  content: '';
+  display: inline-block;
+  width: 0.45rem;
+  height: 1px;
+  margin-right: 0.2rem;
+  vertical-align: middle;
+  background: var(--muted);
+  border-bottom: 1px dashed var(--muted);
+}
+
+.sparkline-threshold-max::before {
+  content: '';
+  display: inline-block;
+  width: 0.45rem;
+  height: 1px;
+  margin-right: 0.2rem;
+  vertical-align: middle;
+  background: var(--muted);
+  border-top: 1px dashed var(--muted);
+}
+
+.sparkline-chart {
+  display: block;
+  flex-shrink: 0;
+}
+
+.sparkline-chart-interactive {
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.sparkline-svg-value {
+  font-size: 9px;
+  font-weight: 600;
+  fill: var(--text);
+  font-family: inherit;
+}
+
+.sparkline-svg-time {
+  font-size: 8px;
+  fill: var(--muted);
+  font-family: inherit;
+}
+
+.sparkline-stats {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.2rem;
+  font-size: 0.62rem;
+  line-height: 1.2;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.sparkline-stat {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.sparkline-stat-label {
+  font-size: 0.58rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  opacity: 0.75;
+}
+
+.sparkline-stat-last {
+  font-weight: 600;
+}
+
+.sparkline-time {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.15rem;
+  font-size: 0.62rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  line-height: 1.2;
+}
+
+.sparkline-time-dash {
+  opacity: 0.5;
 }
 
 .sparkline-empty {
@@ -1613,7 +1746,7 @@ body {
 }
 
 .dashboard-group-title {
-  font-size: 0.85rem;
+  font-size: 1rem;
   font-weight: 600;
   color: var(--text);
 }
@@ -1683,8 +1816,8 @@ body {
   background: var(--surface);
   border: 2px solid var(--border);
   border-radius: 6px;
-  padding: 0.5rem 0.6rem;
-  padding-top: 1.5rem;
+  padding: 0.55rem 0.65rem 0.35rem;
+  padding-top: 1.55rem;
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -1759,8 +1892,8 @@ body {
 .plane-header {
   display: flex;
   flex-direction: column;
-  gap: 0.1rem;
-  margin-bottom: 0.2rem;
+  gap: 0.15rem;
+  margin-bottom: 0.25rem;
   flex-shrink: 0;
   min-height: 0;
   overflow: hidden;
@@ -1771,36 +1904,60 @@ body {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  line-height: 1.25;
 }
 
 .plane-header .obj-label {
-  font-size: 0.75rem;
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--text);
 }
 
 .plane-header .sensor-label {
-  font-size: 0.7rem;
+  font-size: 0.92rem;
+  color: var(--muted);
 }
 
 .plane-value {
-  font-size: 1.1rem;
+  font-size: 1.65rem;
   font-weight: 700;
-  margin: 0.15rem 0;
+  line-height: 1.15;
+  margin: 0.25rem 0 0;
   flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
 }
 
-.plane-ts {
-  font-size: 0.65rem;
-  color: var(--muted);
-  margin-bottom: 0.2rem;
-  flex-shrink: 0;
+.app-dashboard-expanded .plane-header .obj-label {
+  font-size: 1.15rem;
+}
+
+.app-dashboard-expanded .plane-header .sensor-label {
+  font-size: 1rem;
+}
+
+.app-dashboard-expanded .plane-value {
+  font-size: 1.9rem;
 }
 
 .plane-spark {
-  flex: 1;
-  min-height: 0;
-  margin: 0.2rem 0;
+  margin-top: auto;
+  flex-shrink: 0;
+  width: 100%;
   display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
   align-items: center;
+  padding-bottom: 0;
+  overflow: visible;
+}
+
+.plane-spark .sparkline-block {
+  width: 100%;
+}
+
+.plane-spark .sparkline-body {
+  justify-content: center;
 }
 
 .plane-remove {

@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 
+export type SparklineHours = 1 | 2 | 4 | 8;
+
 export type ConfigForm = {
   object_id: number;
   object_label: string;
@@ -11,6 +13,7 @@ export type ConfigForm = {
   min_threshold: string;
   max_threshold: string;
   multiplier: string;
+  sparkline_hours: SparklineHours;
 };
 
 export function ConfigModal({
@@ -100,6 +103,20 @@ export function ConfigModal({
               placeholder="1"
               title="Scale raw values (e.g. 0.001 for millivolts to volts)"
             />
+          </div>
+          <div className="form-row">
+            <label>Mini-chart period</label>
+            <select
+              value={form.sparkline_hours}
+              onChange={(e) =>
+                setForm((f) => ({ ...f, sparkline_hours: Number(e.target.value) as SparklineHours }))
+              }
+            >
+              <option value={1}>Last 1 hour</option>
+              <option value={2}>Last 2 hours</option>
+              <option value={4}>Last 4 hours</option>
+              <option value={8}>Last 8 hours</option>
+            </select>
           </div>
           <div className="modal-actions">
             <button type="button" onClick={onCancel}>Cancel</button>

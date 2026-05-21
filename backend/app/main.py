@@ -120,6 +120,17 @@ class ObjectsFilter(BaseModel):
     include_grouping_info: bool = False  # return group_label, tag_labels, department_label for UI grouping
 
 
+SPARKLINE_HOURS_ALLOWED = (1, 2, 4, 8)
+
+
+def _normalize_sparkline_hours(value: Any) -> int:
+    try:
+        h = int(value)
+    except (TypeError, ValueError):
+        return 1
+    return h if h in SPARKLINE_HOURS_ALLOWED else 1
+
+
 class ConfiguredSensorCreate(BaseModel):
     object_id: int
     device_id: int
@@ -130,6 +141,7 @@ class ConfiguredSensorCreate(BaseModel):
     min_threshold: float | None = None
     max_threshold: float | None = None
     multiplier: float | None = None
+    sparkline_hours: int = 1  # 1, 2, 4, or 8
 
 
 class ConfiguredSensorUpdate(BaseModel):
@@ -137,6 +149,7 @@ class ConfiguredSensorUpdate(BaseModel):
     min_threshold: float | None = None
     max_threshold: float | None = None
     multiplier: float | None = None
+    sparkline_hours: int | None = None
 
 
 class DashboardPlaneCreate(BaseModel):
@@ -846,7 +859,7 @@ def list_configured_sensors(ctx: RequestContext = Depends(_request_context)):
                     f"""
                     SELECT configured_sensor_id, object_id, device_id, sensor_input_label,
                            sensor_source, sensor_id, sensor_label_custom, min_threshold, max_threshold,
-                           multiplier, created_at
+                           multiplier, sparkline_hours, created_at
                     FROM {cfg}
                     WHERE user_id = %s AND is_active = 1
                     ORDER BY created_at DESC
@@ -871,7 +884,7 @@ def list_configured_sensors(ctx: RequestContext = Depends(_request_context)):
                     f"""
                     SELECT c.configured_sensor_id, c.object_id, c.device_id, c.sensor_input_label,
                            c.sensor_source, c.sensor_id, c.sensor_label_custom, c.min_threshold, c.max_threshold,
-                           c.multiplier, c.created_at,
+                           c.multiplier, c.sparkline_hours, c.created_at,
                            o.object_label
                     FROM {cfg} c
                     JOIN raw_business_data.objects o ON o.object_id = c.object_id
@@ -882,21 +895,36 @@ def list_configured_sensors(ctx: RequestContext = Depends(_request_context)):
                 )
                 rows = cur.fetchall()
             except psycopg.errors.UndefinedColumn:
-                cur = conn.execute(
-                    f"""
-                    SELECT c.configured_sensor_id, c.object_id, c.device_id, c.sensor_input_label,
-                           c.sensor_id, c.sensor_label_custom, c.min_threshold, c.max_threshold,
-                           c.created_at,
-                           o.object_label
-                    FROM {cfg} c
-                    JOIN raw_business_data.objects o ON o.object_id = c.object_id
-                    WHERE c.user_id = %s AND c.is_active = true
-                    ORDER BY c.created_at DESC
-                    """,
-                    (uid,),
-                )
-                rows = cur.fetchall()
-                rows = [{**dict(r), "sensor_source": "input", "multiplier": None} for r in rows]
+                try:
+                    cur = conn.execute(
+                        f"""
+                        SELECT c.configured_sensor_id, c.object_id, c.device_id, c.sensor_input_label,
+                               c.sensor_source, c.sensor_id, c.sensor_label_custom, c.min_threshold, c.max_threshold,
+                               c.multiplier, c.created_at,
+                               o.object_label
+                        FROM {cfg} c
+                        JOIN raw_business_data.objects o ON o.object_id = c.object_id
+                        WHERE c.user_id = %s AND c.is_active = true
+                        ORDER BY c.created_at DESC
+                        """,
+                        (uid,),
+                    )
+                    rows = [{**dict(r), "sparkline_hours": 1} for r in cur.fetchall()]
+                except psycopg.errors.UndefinedColumn:
+                    cur = conn.execute(
+                        f"""
+                        SELECT c.configured_sensor_id, c.object_id, c.device_id, c.sensor_input_label,
+                               c.sensor_id, c.sensor_label_custom, c.min_threshold, c.max_threshold,
+                               c.created_at,
+                               o.object_label
+                        FROM {cfg} c
+                        JOIN raw_business_data.objects o ON o.object_id = c.object_id
+                        WHERE c.user_id = %s AND c.is_active = true
+                        ORDER BY c.created_at DESC
+                        """,
+                        (uid,),
+                    )
+                    rows = [{**dict(r), "sensor_source": "input", "multiplier": None, "sparkline_hours": 1} for r in cur.fetchall()]
             return [dict(r) for r in rows]
     except psycopg.errors.UndefinedTable:
         return []
@@ -910,6 +938,7 @@ def add_configured_sensor(
     uid = ctx.user_id
     if body.min_threshold is not None and body.max_threshold is not None and body.min_threshold >= body.max_threshold:
         raise HTTPException(400, "MIN must be less than MAX")
+    sparkline_hours = _normalize_sparkline_hours(body.sparkline_hours)
     dsn = ctx.dsn
     source = (body.sensor_source or "input").strip().lower()
     if source not in ("input", "state", "tracking"):
@@ -923,9 +952,9 @@ def add_configured_sensor(
                 cur = conn.execute(
                     f"""
                     INSERT INTO {cfg}
-                    (user_id, object_id, device_id, sensor_input_label, sensor_source, sensor_id, sensor_label_custom, min_threshold, max_threshold, multiplier)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    RETURNING configured_sensor_id, object_id, device_id, sensor_input_label, sensor_source, sensor_label_custom, min_threshold, max_threshold, multiplier, created_at
+                    (user_id, object_id, device_id, sensor_input_label, sensor_source, sensor_id, sensor_label_custom, min_threshold, max_threshold, multiplier, sparkline_hours)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    RETURNING configured_sensor_id, object_id, device_id, sensor_input_label, sensor_source, sensor_label_custom, min_threshold, max_threshold, multiplier, sparkline_hours, created_at
                     """,
                     (
                         uid,
@@ -938,6 +967,7 @@ def add_configured_sensor(
                         body.min_threshold,
                         body.max_threshold,
                         body.multiplier,
+                        sparkline_hours,
                     ),
                 )
                 row = cur.fetchone()
@@ -946,9 +976,9 @@ def add_configured_sensor(
                     cur = conn.execute(
                         f"""
                         INSERT INTO {cfg}
-                        (user_id, object_id, device_id, sensor_input_label, sensor_source, sensor_id, sensor_label_custom, min_threshold, max_threshold, multiplier)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                        RETURNING configured_sensor_id, object_id, device_id, sensor_input_label, sensor_source, sensor_label_custom, min_threshold, max_threshold, multiplier, created_at
+                        (user_id, object_id, device_id, sensor_input_label, sensor_source, sensor_id, sensor_label_custom, min_threshold, max_threshold, multiplier, sparkline_hours)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        RETURNING configured_sensor_id, object_id, device_id, sensor_input_label, sensor_source, sensor_label_custom, min_threshold, max_threshold, multiplier, sparkline_hours, created_at
                         """,
                         (
                             uid,
@@ -961,6 +991,7 @@ def add_configured_sensor(
                             body.min_threshold,
                             body.max_threshold,
                             body.multiplier,
+                            sparkline_hours,
                         ),
                     )
                     row = cur.fetchone()
@@ -988,6 +1019,7 @@ def add_configured_sensor(
                         row = dict(row)
                         row["sensor_source"] = "input"
                         row["multiplier"] = None
+                        row["sparkline_hours"] = sparkline_hours
             if row is None:
                 raise HTTPException(status_code=500, detail="INSERT returned no row")
             conn.commit()
@@ -1023,6 +1055,8 @@ def update_configured_sensor(
     uid = ctx.user_id
     if body.min_threshold is not None and body.max_threshold is not None and body.min_threshold >= body.max_threshold:
         raise HTTPException(400, "MIN must be less than MAX")
+    if body.sparkline_hours is not None and body.sparkline_hours not in SPARKLINE_HOURS_ALLOWED:
+        raise HTTPException(400, "sparkline_hours must be 1, 2, 4, or 8")
     dsn = ctx.dsn
     use_sqlite = ctx.app_state_dsn is None and app_state_uses_sqlite()
     updated_at = "datetime('now')" if use_sqlite else "now()"
@@ -1043,6 +1077,9 @@ def update_configured_sensor(
         if "multiplier" in payload:
             updates.append("multiplier = %s")
             params.append(body.multiplier)
+        if "sparkline_hours" in payload:
+            updates.append("sparkline_hours = %s")
+            params.append(_normalize_sparkline_hours(body.sparkline_hours))
         if not updates:
             raise HTTPException(400, "No fields to update")
         updates.append(f"updated_at = {updated_at}")
@@ -1079,10 +1116,95 @@ def delete_configured_sensor(
     return {"ok": True}
 
 
-# ---------- Sparklines (batch last hour) ----------
+# ---------- Sparklines (batch, configurable hours per pair) ----------
 
 def _series_key(device_id: int, label: str, source: str) -> str:
     return f"{device_id}:{source}:{label}"
+
+
+def _sparkline_row_ts_value(r: dict, ts_field: str = "ts") -> dict:
+    ts = r[ts_field]
+    val = r["value"]
+    return {
+        "ts": ts.isoformat() if hasattr(ts, "isoformat") else str(ts),
+        "value": float(val) if val is not None else None,
+    }
+
+
+def _fetch_sparklines_for_hours(
+    conn: Any,
+    has_tb: bool,
+    normalized: list[tuple[int, str, str]],
+    hours: int,
+    series: dict[str, list[dict]],
+) -> None:
+    time_cond = "now() - make_interval(hours => %s)"
+
+    input_keys = [(d, l) for (d, l, s) in normalized if s == "input"]
+    if input_keys:
+        placeholders = ",".join(["(%s,%s)"] * len(input_keys))
+        flat = [x for k in input_keys for x in k] + [hours]
+        bucket_expr = "time_bucket('1 minute', i.device_time)" if has_tb else "date_trunc('minute', i.device_time)"
+        sql = f"""
+            WITH cfg(device_id, sensor_name) AS (VALUES {placeholders}),
+            series AS (
+                SELECT i.device_id, i.sensor_name, {bucket_expr} AS bucket_ts,
+                       avg(NULLIF(i.value,'')::numeric) AS value
+                FROM raw_telematics_data.inputs i
+                JOIN cfg ON cfg.device_id = i.device_id AND cfg.sensor_name = i.sensor_name
+                WHERE i.device_time >= {time_cond}
+                GROUP BY i.device_id, i.sensor_name, {bucket_expr}
+            )
+            SELECT device_id, sensor_name, bucket_ts AS ts, value FROM series ORDER BY device_id, sensor_name, ts
+        """
+        cur = conn.execute(sql, flat)
+        for r in cur.fetchall():
+            key = _series_key(r["device_id"], r["sensor_name"], "input")
+            series.setdefault(key, []).append(_sparkline_row_ts_value(r))
+
+    state_keys = [(d, l) for (d, l, s) in normalized if s == "state"]
+    if state_keys:
+        placeholders = ",".join(["(%s,%s)"] * len(state_keys))
+        flat = [x for k in state_keys for x in k] + [hours]
+        bucket_expr = "time_bucket('1 minute', s.device_time)" if has_tb else "date_trunc('minute', s.device_time)"
+        sql = f"""
+            WITH cfg(device_id, state_name) AS (VALUES {placeholders}),
+            series AS (
+                SELECT s.device_id, s.state_name AS sensor_name, {bucket_expr} AS bucket_ts,
+                       avg(NULLIF(s.value,'')::numeric) AS value
+                FROM raw_telematics_data.states s
+                JOIN cfg ON cfg.device_id = s.device_id AND cfg.state_name = s.state_name
+                WHERE s.device_time >= {time_cond}
+                GROUP BY s.device_id, s.state_name, {bucket_expr}
+            )
+            SELECT device_id, sensor_name, bucket_ts AS ts, value FROM series ORDER BY device_id, sensor_name, ts
+        """
+        cur = conn.execute(sql, flat)
+        for r in cur.fetchall():
+            key = _series_key(r["device_id"], r["sensor_name"], "state")
+            series.setdefault(key, []).append(_sparkline_row_ts_value(r))
+
+    tracking_pairs = [(d, l) for (d, l, s) in normalized if s == "tracking" and l in TRACKING_DATA_CORE_SIGNALS]
+    if tracking_pairs:
+        col_to_devices: dict[str, list[int]] = {}
+        for d, col in tracking_pairs:
+            col_to_devices.setdefault(col, []).append(d)
+        for col in col_to_devices:
+            device_ids = list(dict.fromkeys(col_to_devices[col]))
+            placeholders = ",".join(["%s"] * len(device_ids))
+            bucket_expr = "time_bucket('1 minute', t.device_time)" if has_tb else "date_trunc('minute', t.device_time)"
+            sql = f"""
+                SELECT t.device_id, {bucket_expr} AS bucket_ts,
+                       avg((t.{col})::numeric) AS value
+                FROM raw_telematics_data.tracking_data_core t
+                WHERE t.device_id IN ({placeholders}) AND t.device_time >= {time_cond}
+                GROUP BY t.device_id, {bucket_expr}
+                ORDER BY t.device_id, bucket_ts
+            """
+            cur = conn.execute(sql, (*device_ids, hours))
+            for r in cur.fetchall():
+                key = _series_key(r["device_id"], col, "tracking")
+                series.setdefault(key, []).append(_sparkline_row_ts_value(r, ts_field="bucket_ts"))
 
 
 @app.post("/api/sparklines")
@@ -1090,18 +1212,19 @@ def batch_sparklines(
     body: SparklinesRequest,
     ctx: RequestContext = Depends(_request_context),
 ):
-    """Body: { "pairs": [ { "device_id", "sensor_input_label", "sensor_source"?: "input"|"state"|"tracking" }, ... ] }
+    """Body: { "pairs": [ { "device_id", "sensor_input_label", "sensor_source"?, "hours"?: 1|2|4|8 }, ... ] }
     Returns: { "series": { "device_id:source:sensor_input_label": [ { "ts", "value" }, ... ] } }
     """
     pairs = body.pairs or []
     if not pairs:
         return {"series": {}}
-    normalized = []
+    by_hours: dict[int, list[tuple[int, str, str]]] = {}
     for p in pairs:
         src = (p.get("sensor_source") or "input").strip().lower()
         if src not in ("input", "state", "tracking"):
             src = "input"
-        normalized.append((p["device_id"], p["sensor_input_label"], src))
+        hours = _normalize_sparkline_hours(p.get("hours"))
+        by_hours.setdefault(hours, []).append((p["device_id"], p["sensor_input_label"], src))
     dsn = ctx.dsn
     series: dict[str, list[dict]] = {}
     with get_conn(dsn) as conn:
@@ -1110,82 +1233,8 @@ def batch_sparklines(
         )
         row_tb = cur.fetchone()
         has_tb = bool(row_tb and row_tb.get("has_tb"))
-
-        # --- inputs ---
-        input_keys = [(d, l) for (d, l, s) in normalized if s == "input"]
-        if input_keys:
-            placeholders = ",".join(["(%s,%s)"] * len(input_keys))
-            flat = [x for k in input_keys for x in k]
-            bucket_expr = "time_bucket('1 minute', i.device_time)" if has_tb else "date_trunc('minute', i.device_time)"
-            sql = f"""
-                WITH cfg(device_id, sensor_name) AS (VALUES {placeholders}),
-                series AS (
-                    SELECT i.device_id, i.sensor_name, {bucket_expr} AS bucket_ts,
-                           avg(NULLIF(i.value,'')::numeric) AS value
-                    FROM raw_telematics_data.inputs i
-                    JOIN cfg ON cfg.device_id = i.device_id AND cfg.sensor_name = i.sensor_name
-                    WHERE i.device_time >= now() - interval '1 hour'
-                    GROUP BY i.device_id, i.sensor_name, {bucket_expr}
-                )
-                SELECT device_id, sensor_name, bucket_ts AS ts, value FROM series ORDER BY device_id, sensor_name, ts
-            """
-            cur = conn.execute(sql, flat)
-            for r in cur.fetchall():
-                key = _series_key(r["device_id"], r["sensor_name"], "input")
-                if key not in series:
-                    series[key] = []
-                series[key].append({"ts": r["ts"].isoformat() if hasattr(r["ts"], "isoformat") else str(r["ts"]), "value": float(r["value"]) if r["value"] is not None else None})
-
-        # --- states ---
-        state_keys = [(d, l) for (d, l, s) in normalized if s == "state"]
-        if state_keys:
-            placeholders = ",".join(["(%s,%s)"] * len(state_keys))
-            flat = [x for k in state_keys for x in k]
-            bucket_expr = "time_bucket('1 minute', s.device_time)" if has_tb else "date_trunc('minute', s.device_time)"
-            sql = f"""
-                WITH cfg(device_id, state_name) AS (VALUES {placeholders}),
-                series AS (
-                    SELECT s.device_id, s.state_name AS sensor_name, {bucket_expr} AS bucket_ts,
-                           avg(NULLIF(s.value,'')::numeric) AS value
-                    FROM raw_telematics_data.states s
-                    JOIN cfg ON cfg.device_id = s.device_id AND cfg.state_name = s.state_name
-                    WHERE s.device_time >= now() - interval '1 hour'
-                    GROUP BY s.device_id, s.state_name, {bucket_expr}
-                )
-                SELECT device_id, sensor_name, bucket_ts AS ts, value FROM series ORDER BY device_id, sensor_name, ts
-            """
-            cur = conn.execute(sql, flat)
-            for r in cur.fetchall():
-                key = _series_key(r["device_id"], r["sensor_name"], "state")
-                if key not in series:
-                    series[key] = []
-                series[key].append({"ts": r["ts"].isoformat() if hasattr(r["ts"], "isoformat") else str(r["ts"]), "value": float(r["value"]) if r["value"] is not None else None})
-
-        # --- tracking_data_core (one query per column, whitelisted) ---
-        tracking_pairs = [(d, l) for (d, l, s) in normalized if s == "tracking" and l in TRACKING_DATA_CORE_SIGNALS]
-        if tracking_pairs:
-            col_to_devices: dict[str, list[int]] = {}
-            for d, col in tracking_pairs:
-                col_to_devices.setdefault(col, []).append(d)
-            for col in col_to_devices:
-                device_ids = list(dict.fromkeys(col_to_devices[col]))
-                placeholders = ",".join(["%s"] * len(device_ids))
-                bucket_expr = "time_bucket('1 minute', t.device_time)" if has_tb else "date_trunc('minute', t.device_time)"
-                # Safe: col is from TRACKING_DATA_CORE_SIGNALS
-                sql = f"""
-                    SELECT t.device_id, {bucket_expr} AS bucket_ts,
-                           avg((t.{col})::numeric) AS value
-                    FROM raw_telematics_data.tracking_data_core t
-                    WHERE t.device_id IN ({placeholders}) AND t.device_time >= now() - interval '1 hour'
-                    GROUP BY t.device_id, {bucket_expr}
-                    ORDER BY t.device_id, bucket_ts
-                """
-                cur = conn.execute(sql, device_ids)
-                for r in cur.fetchall():
-                    key = _series_key(r["device_id"], col, "tracking")
-                    if key not in series:
-                        series[key] = []
-                    series[key].append({"ts": r["bucket_ts"].isoformat() if hasattr(r["bucket_ts"], "isoformat") else str(r["bucket_ts"]), "value": float(r["value"]) if r["value"] is not None else None})
+        for hours, normalized in by_hours.items():
+            _fetch_sparklines_for_hours(conn, has_tb, normalized, hours, series)
 
     return {"series": series}
 

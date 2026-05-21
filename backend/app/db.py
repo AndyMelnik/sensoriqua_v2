@@ -54,6 +54,7 @@ CREATE TABLE IF NOT EXISTS configured_sensors (
   min_threshold REAL NULL,
   max_threshold REAL NULL,
   multiplier REAL NULL,
+  sparkline_hours INTEGER NOT NULL DEFAULT 1,
   is_active INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -163,6 +164,15 @@ def _migrate_sqlite_multiplier(conn: sqlite3.Connection) -> None:
         conn.commit()
 
 
+def _migrate_sqlite_sparkline_hours(conn: sqlite3.Connection) -> None:
+    """Add sparkline_hours column to configured_sensors if missing (for existing DBs)."""
+    cur = conn.execute("PRAGMA table_info(configured_sensors)")
+    cols = [row[1] for row in cur.fetchall()]
+    if "sparkline_hours" not in cols:
+        conn.execute("ALTER TABLE configured_sensors ADD COLUMN sparkline_hours INTEGER NOT NULL DEFAULT 1")
+        conn.commit()
+
+
 _SQLITE_INITED: set[Path] = set()
 
 
@@ -179,6 +189,7 @@ def _init_sqlite_schema(path: Path) -> None:
         conn.executescript(_SQLITE_SCHEMA)
         conn.commit()
         _migrate_sqlite_multiplier(conn)
+        _migrate_sqlite_sparkline_hours(conn)
     finally:
         conn.close()
     _SQLITE_INITED.add(path)

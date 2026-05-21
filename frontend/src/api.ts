@@ -161,6 +161,8 @@ export class ApiError extends Error {
   }
 }
 
+export type SparklineHours = 1 | 2 | 4 | 8;
+
 export async function addConfiguredSensor(body: {
   object_id: number;
   device_id: number;
@@ -171,6 +173,7 @@ export async function addConfiguredSensor(body: {
   min_threshold?: number | null;
   max_threshold?: number | null;
   multiplier?: number | null;
+  sparkline_hours?: SparklineHours;
 }) {
   const url = `${API_BASE}/api/configured-sensors`;
   const r = await fetch(url, {
@@ -201,7 +204,7 @@ export async function addConfiguredSensor(body: {
   return JSON.parse(responseBody);
 }
 
-export async function updateConfiguredSensor(id: number, body: { sensor_label_custom?: string; min_threshold?: number | null; max_threshold?: number | null; multiplier?: number | null }) {
+export async function updateConfiguredSensor(id: number, body: { sensor_label_custom?: string; min_threshold?: number | null; max_threshold?: number | null; multiplier?: number | null; sparkline_hours?: SparklineHours }) {
   const url = `${API_BASE}/api/configured-sensors/${id}`;
   const r = await fetch(url, {
     method: 'PATCH',
@@ -237,7 +240,7 @@ export async function deleteConfiguredSensor(id: number) {
   return r.json();
 }
 
-export type SparklinePair = { device_id: number; sensor_input_label: string; sensor_source?: 'input' | 'state' | 'tracking' };
+export type SparklinePair = { device_id: number; sensor_input_label: string; sensor_source?: 'input' | 'state' | 'tracking'; hours?: SparklineHours };
 export async function getSparklines(pairs: SparklinePair[]) {
   const r = await fetch(`${API_BASE}/api/sparklines`, {
     method: 'POST',

@@ -24,14 +24,14 @@ Summary of the main HTTP API used by the frontend. Full OpenAPI spec is availabl
 
 **Map / business mapping:** `vehicles` lists fleet rows (`vehicles.object_id` → objects). `employees` lists staff with an object assignment. `sensor_names` lists distinct `sensor_description` rows (`sensor_id` + label). Object filters use `vehicle_ids` / `employee_ids` / `sensor_ids` via EXISTS joins on `vehicles`, `employees`, and `sensor_description` respectively.
 | GET | /api/configured-sensors | List configured sensors for current user. |
-| POST | /api/configured-sensors | Create; body: object_id, device_id, sensor_input_label, sensor_source, sensor_label_custom, min_threshold, max_threshold, multiplier. |
-| PATCH | /api/configured-sensors/{id} | Update; body: sensor_label_custom, min_threshold, max_threshold, multiplier. |
+| POST | /api/configured-sensors | Create; body: object_id, device_id, sensor_input_label, sensor_source, sensor_label_custom, min_threshold, max_threshold, multiplier, sparkline_hours (1\|2\|4\|8, default 1). |
+| PATCH | /api/configured-sensors/{id} | Update; body: sensor_label_custom, min_threshold, max_threshold, multiplier, sparkline_hours. |
 | DELETE | /api/configured-sensors/{id} | Soft-delete (is_active = false). |
 | GET | /api/dashboard-planes | List dashboard planes for current user (with object_label, thresholds, multiplier). |
 | POST | /api/dashboard-planes | Add plane; body: configured_sensor_id, position_index. |
 | DELETE | /api/dashboard-planes/{id} | Remove plane. |
 | PATCH | /api/dashboard-planes/order | Reorder; body: order = [ { dashboard_plane_id, position_index }, ... ]. |
-| POST | /api/sparklines | Body: pairs = [ { device_id, sensor_input_label, sensor_source? } ]. Returns series keyed by "device_id:source:label". |
+| POST | /api/sparklines | Body: pairs = [ { device_id, sensor_input_label, sensor_source?, hours? (1\|2\|4\|8) } ]. Returns series keyed by "device_id:source:label". |
 | POST | /api/latest-values | Body: pairs (same shape). Returns values keyed by "device_id:source:label". |
 | GET | /api/map-condition-fields | Distinct **sensor_name** from `raw_telematics_data.inputs` and **state_name** from `raw_telematics_data.states` (for map condition pickers). |
 | POST | /api/map-positions | Body: `{ "device_ids": [ 1, 2, 3 ] }`. Returns latest **lat, lon, ts, speed** per device from the **last row** in `tracking_data_core` (ORDER BY device_time DESC), so lat and lon come from the same GPS fix. |
