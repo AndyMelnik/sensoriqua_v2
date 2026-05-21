@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import * as XLSX from 'xlsx';
+import { downloadXlsxFile } from './exportXlsx';
 
 export type ReportTableColumn = { key: string; label: string };
 export type ReportTableRow = { ts?: string; date?: string; [key: string]: string | number | null | undefined };
@@ -75,11 +75,12 @@ export function ReportTable({
   };
 
   const exportXlsx = () => {
-    const wsData = [columns.map((c) => c.label), ...sortedRows.map((r) => columns.map((c) => r[c.key] ?? ''))];
-    const ws = XLSX.utils.aoa_to_sheet(wsData);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Report');
-    XLSX.writeFile(wb, `sensoriqua-report-${new Date().toISOString().slice(0, 10)}.xlsx`);
+    void downloadXlsxFile(
+      `sensoriqua-report-${new Date().toISOString().slice(0, 10)}.xlsx`,
+      'Report',
+      columns.map((c) => c.label),
+      sortedRows.map((r) => columns.map((c) => r[c.key] ?? ''))
+    );
   };
 
   const exportHtml = () => {

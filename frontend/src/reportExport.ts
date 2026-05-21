@@ -4,7 +4,11 @@ import type { ReportTableColumn, ReportTableRow } from './ReportTable';
 
 export type ReportLegendItem = { label: string; color: string };
 
+export const DEFAULT_REPORT_TITLE = 'Sensor reading report';
+
 export type FullReportExportInput = {
+  title: string;
+  description?: string;
   chartSvg: string;
   legendItems: ReportLegendItem[];
   columns: ReportTableColumn[];
@@ -13,6 +17,10 @@ export type FullReportExportInput = {
   summaryRows: ReportTableRow[];
   exportedAt?: Date;
 };
+
+export function reportFileSlug(title: string): string {
+  return title.trim().replace(/[^\w\s-]/g, '').replace(/\s+/g, '-') || 'report';
+}
 
 type JsPdfWithAutoTable = jsPDF & {
   lastAutoTable?: { finalY: number };
@@ -59,11 +67,14 @@ export function buildFullReportHtml(input: FullReportExportInput): string {
     .join('');
   const summaryHeader = `<thead><tr>${input.summaryColumns.map((c) => `<th>${escapeReportHtml(c.label)}</th>`).join('')}</tr></thead>`;
 
+  const title = (input.title || DEFAULT_REPORT_TITLE).trim() || DEFAULT_REPORT_TITLE;
+  const description = (input.description || '').trim();
+
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Sensoriqua Report</title>
+  <title>${escapeReportHtml(title)}</title>
   <style>
     @page { size: A4 landscape; margin: 1.2cm; }
     html, body { margin: 0; padding: 0; }
@@ -78,12 +89,14 @@ export function buildFullReportHtml(input: FullReportExportInput): string {
     table { width: 100%; border-collapse: collapse; font-size: 0.8rem; margin-bottom: 0.9rem; }
     th, td { padding: 0.35rem 0.5rem; text-align: left; border-bottom: 1px solid #d1d5db; color: #0f172a; }
     th { background: #f3f4f6; color: #374151; }
-    .meta { font-size: 0.8rem; color: #4b5563; margin-bottom: 0.6rem; }
+    .meta { font-size: 0.8rem; color: #4b5563; margin-bottom: 0.35rem; }
+    .report-description { font-size: 0.9rem; color: #374151; margin: 0 0 0.6rem; line-height: 1.45; white-space: pre-wrap; }
     tr { page-break-inside: avoid; }
   </style>
 </head>
 <body>
-  <h1>Sensor reading report</h1>
+  <h1>${escapeReportHtml(title)}</h1>
+  ${description ? `<p class="report-description">${escapeReportHtml(description)}</p>` : ''}
   <p class="meta">Exported ${escapeReportHtml(exportedAt.toLocaleString())}</p>
   <h2>Graph</h2>
   <div class="chart-wrap">${input.chartSvg}</div>
@@ -105,8 +118,9 @@ export function buildFullReportHtml(input: FullReportExportInput): string {
 </html>`;
 }
 
-export function reportExportFilename(ext: 'html' | 'pdf'): string {
-  return `sensoriqua-report-${new Date().toISOString().slice(0, 10)}.${ext}`;
+export function reportExportFilename(ext: 'html' | 'pdf', title?: string): string {
+  const slug = reportFileSlug(title || DEFAULT_REPORT_TITLE);
+  return `sensoriqua-${slug}-${new Date().toISOString().slice(0, 10)}.${ext}`;
 }
 
 export function downloadReportHtml(html: string, filename = reportExportFilename('html')): void {
@@ -239,11 +253,25 @@ export async function downloadReportPdf(
   const contentWidth = pageWidth - PDF_MARGIN_MM * 2;
   let y = PDF_MARGIN_MM;
 
+  const title = (input.title || DEFAULT_REPORT_TITLE).trim() || DEFAULT_REPORT_TITLE;
+  const description = (input.description || '').trim();
+
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(16);
   doc.setTextColor(15, 23, 42);
-  doc.text('Sensor reading report', PDF_MARGIN_MM, y);
-  y += 8;
+  const titleLines = doc.splitTextToSize(title, contentWidth);
+  doc.text(titleLines, PDF_MARGIN_MM, y);
+  y += titleLines.length * 7 + 2;
+
+  if (description) {
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+    doc.setTextColor(55, 65, 81);
+    const descLines = doc.splitTextToSize(description, contentWidth);
+    y = ensureSpace(doc, y, descLines.length * 4 + 2, pageHeight);
+    doc.text(descLines, PDF_MARGIN_MM, y);
+    y += descLines.length * 4 + 4;
+  }
 
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(9);

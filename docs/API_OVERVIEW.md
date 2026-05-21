@@ -21,8 +21,6 @@ Summary of the main HTTP API used by the frontend. Full OpenAPI spec is availabl
 | GET | /api/groupings | List groupings: `type` = groups \| tags \| departments \| garages \| sensor_types \| **vehicles** \| **employees** \| **sensor_names**; optional `search`. |
 | POST | /api/objects | List objects; body: group_ids, tag_ids, department_ids, garage_ids, sensor_type_ids, **vehicle_ids**, **employee_ids**, **sensor_ids**, client_id, include_grouping_info. |
 | GET | /api/objects/{id}/sensors | Sensors for one object; optional search, include_type_and_params. |
-
-**Map / business mapping:** `vehicles` lists fleet rows (`vehicles.object_id` → objects). `employees` lists staff with an object assignment. `sensor_names` lists distinct `sensor_description` rows (`sensor_id` + label). Object filters use `vehicle_ids` / `employee_ids` / `sensor_ids` via EXISTS joins on `vehicles`, `employees`, and `sensor_description` respectively.
 | GET | /api/configured-sensors | List configured sensors for current user. |
 | POST | /api/configured-sensors | Create; body: object_id, device_id, sensor_input_label, sensor_source, sensor_label_custom, min_threshold, max_threshold, multiplier, sparkline_hours (1\|2\|4\|8, default 1). |
 | PATCH | /api/configured-sensors/{id} | Update; body: sensor_label_custom, min_threshold, max_threshold, multiplier, sparkline_hours. |
@@ -36,6 +34,8 @@ Summary of the main HTTP API used by the frontend. Full OpenAPI spec is availabl
 | GET | /api/map-condition-fields | Distinct **sensor_name** from `raw_telematics_data.inputs` and **state_name** from `raw_telematics_data.states` (for map condition pickers). |
 | POST | /api/map-positions | Body: `{ "device_ids": [ 1, 2, 3 ] }`. Returns latest **lat, lon, ts, speed** per device from the **last row** in `tracking_data_core` (ORDER BY device_time DESC), so lat and lon come from the same GPS fix. |
 | POST | /api/sensor-history | Body: device_id, sensor_input_label, sensor_source?, hours? (1\|4\|12\|24), from_ts?, to_ts?, raw? (unresampled). Returns { series: [ { ts, value }, ... ] }. |
+
+**Map / business mapping (groupings + objects):** `vehicles` lists fleet rows (`vehicles.object_id` → objects). `employees` lists staff with an object assignment. `sensor_names` lists distinct `sensor_description` rows (`sensor_id` + label). Object filters use `vehicle_ids` / `employee_ids` / `sensor_ids` via EXISTS joins on `vehicles`, `employees`, and `sensor_description` respectively.
 
 ---
 
@@ -98,7 +98,9 @@ Exported report JSON (from the Reports tab) has this shape:
         }
       ],
       "dateFrom": "2025-03-01T00:00",
-      "dateTo": "2025-03-06T23:59"
+      "dateTo": "2025-03-06T23:59",
+      "title": "Sensor reading report",
+      "description": "Optional notes shown in HTML/PDF export"
     },
     "data": {
       "chartSeries": [ { "label": "Speed", "color": "#0ea5e9", "data": [ { "ts": "...", "value": 50 } ] } ],
@@ -115,6 +117,10 @@ Exported report JSON (from the Reports tab) has this shape:
 - **data** — Optional. If present, the report was generated at export time; import can show the graph and tables without calling the API. Contains **chartSeries** (ReportSeries), **tableRows**, **columns**, **summaryRows**, **summaryColumns**.
 
 On import, the UI restores the timeframe and selected objects; after sensors are loaded for those objects, it restores the sensor slots (matched by input_label and sensor_source) and multipliers. If **data** is present, it is displayed as the current report.
+
+**HTML / PDF export** — Built in the browser from the current report view (`reportExport.ts`). **PDF** uses jsPDF + jspdf-autotable (chart SVG rasterized into the PDF). No server endpoint for report files.
+
+**XLSX export** — Per-table download in the UI via `exportXlsx.ts` (ExcelJS, write-only; no parsing of uploaded spreadsheets).
 
 ---
 

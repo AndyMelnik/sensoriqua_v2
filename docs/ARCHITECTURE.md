@@ -35,7 +35,7 @@ High-level technical overview of the application.
 
 ## Backend layout
 
-- **`app/main.py`** — FastAPI app, CORS, security headers, routes (groupings, objects, sensors, configured sensors, dashboard planes, sparklines, sensor history, latest values, auth). Serves `backend/static/` when present.
+- **`app/main.py`** — FastAPI app, CORS, security headers, routes (groupings, objects, sensors, configured sensors, dashboard planes, sparklines, sensor history, latest values, map positions/condition fields, auth). Serves `backend/static/` when present.
 - **`app/db.py`** — Connection helpers for Postgres (telematics/business) and app state (Postgres or SQLite); table name resolution; SQLite WAL and busy timeout.
 - **`app/auth.py`** — JWT create/verify, credential storage, request context (DSN, user_id).
 
@@ -45,12 +45,16 @@ Schema names and table names used in SQL are fixed or derived from `app_state_ta
 
 ## Frontend layout
 
-- **`App.tsx`** — Root component: tabs (Dashboards / Reports), left panel (steps 1–4 in Reports), configured sensors, dashboard grid (with grouping), report chart and tables, modals (config, group, export, confirm, history, debug).
+- **`App.tsx`** — Root component: tabs (**Dashboards** / **Reports** / **Map**), left panel workflows, configured sensors, dashboard grid (with grouping), report chart and tables, modals (config, group, export, confirm, history, debug).
 - **`api.ts`** — API client: DSN, auth token, localStorage for configured sensors, dashboard planes, dashboard groups and assignments; all `/api/*` calls.
+- **`MapTab.tsx`** — Map tab: entity filter, object scope, telemetry conditions, `POST /api/map-positions`, table + map.
+- **`UnitsMap.tsx`** / **`MapUnitsTable.tsx`** — Leaflet map and sortable/filterable units table with XLSX export.
 - **`ReportChart.tsx`** — Multi-series graph: zoom (drag), reset, legend toggles, tooltip, segments (no drop to zero on missing values).
-- **`ReportTable.tsx`** — Sortable, filterable, paginated table with Export XLSX (and optional Export HTML).
-- **`Sparkline.tsx`** / **`HistoryChart.tsx`** — Small and full history charts for dashboard.
-- **`ConfigModal.tsx`** / **`AccordionStep.tsx`** — Config form and collapsible steps.
+- **`ReportTable.tsx`** — Sortable, filterable, paginated table; Export XLSX / optional Export HTML.
+- **`reportExport.ts`** — Shared HTML builder; PDF via jsPDF + autotable; filenames from report title.
+- **`exportXlsx.ts`** — ExcelJS write-only helper for table downloads (replaces legacy `xlsx` / SheetJS).
+- **`Sparkline.tsx`** / **`HistoryChart.tsx`** — Mini charts (configurable 1–8 h via API) with hover stats; full history modal for dashboard.
+- **`ConfigModal.tsx`** / **`AccordionStep.tsx`** — Config form (incl. `sparkline_hours`) and collapsible steps.
 
 State: React useState/useCallback/useRef; report data and chart size from API and ResizeObserver. No global store.
 

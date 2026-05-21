@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import * as XLSX from 'xlsx';
+import { downloadXlsxFile } from './exportXlsx';
 
 export type MapTableColumn = { key: string; label: string };
 export type MapTableRow = Record<string, string | number | null | undefined>;
@@ -92,14 +92,12 @@ export function MapUnitsTable({
 
   const exportXlsx = () => {
     const visibleCols = columns.filter((c) => !hiddenKeys.has(c.key));
-    const wsData = [
+    void downloadXlsxFile(
+      `sensoriqua-map-units-${new Date().toISOString().slice(0, 10)}.xlsx`,
+      'Map units',
       visibleCols.map((c) => c.label),
-      ...sortedRows.map((r) => visibleCols.map((c) => formatCell(c.key, r[c.key]))),
-    ];
-    const ws = XLSX.utils.aoa_to_sheet(wsData);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Map units');
-    XLSX.writeFile(wb, `sensoriqua-map-units-${new Date().toISOString().slice(0, 10)}.xlsx`);
+      sortedRows.map((r) => visibleCols.map((c) => formatCell(c.key, r[c.key])))
+    );
   };
 
   return (

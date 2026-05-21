@@ -9,8 +9,11 @@ import { ReportTable } from './ReportTable';
 import { MapTab } from './MapTab';
 import {
   buildFullReportHtml,
+  DEFAULT_REPORT_TITLE,
   downloadReportHtml,
   downloadReportPdf,
+  reportExportFilename,
+  reportFileSlug,
   type FullReportExportInput,
 } from './reportExport';
 import './App.css';
@@ -82,7 +85,13 @@ const GROUPING_LABELS: Record<GroupingType, string> = {
 /** Report export JSON: config (objects + sensors + timeframe) and optional cached data */
 type ReportExportSensor = { input_label: string; sensor_source: string; label: string; multiplier: number | string };
 type ReportExportObject = { object_id: number; object_label: string; device_id: number; sensors: ReportExportSensor[] };
-type ReportExportConfig = { objects: ReportExportObject[]; dateFrom: string; dateTo: string };
+type ReportExportConfig = {
+  objects: ReportExportObject[];
+  dateFrom: string;
+  dateTo: string;
+  title?: string;
+  description?: string;
+};
 type ReportExportData = {
   chartSeries: ReportSeries[];
   tableRows: { ts: string; [key: string]: string | number | null }[];
@@ -151,6 +160,8 @@ export default function App() {
     return d.toISOString().slice(0, 16);
   });
   const [reportDateTo, setReportDateTo] = useState(() => new Date().toISOString().slice(0, 16));
+  const [reportTitle, setReportTitle] = useState(DEFAULT_REPORT_TITLE);
+  const [reportDescription, setReportDescription] = useState('');
   const [reportLoading, setReportLoading] = useState(false);
   const [reportPdfExporting, setReportPdfExporting] = useState(false);
   const [reportData, setReportData] = useState<{
@@ -178,6 +189,8 @@ export default function App() {
     objects: ReportExportObject[];
     dateFrom: string;
     dateTo: string;
+    title?: string;
+    description?: string;
     data?: ReportExportData;
   } | null>(null);
 
@@ -1009,6 +1022,8 @@ export default function App() {
     if (!reportData) return null;
     const chartSvg = reportChartContainerRef.current?.querySelector('.report-chart-svg')?.outerHTML ?? '';
     return {
+      title: reportTitle.trim() || DEFAULT_REPORT_TITLE,
+      description: reportDescription.trim(),
       chartSvg,
       legendItems: reportData.chartSeries.map((s) => ({ label: s.label, color: s.color })),
       columns: reportData.columns,
@@ -1016,7 +1031,7 @@ export default function App() {
       summaryColumns: reportData.summaryColumns,
       summaryRows: reportData.summaryRows,
     };
-  }, [reportData]);
+  }, [reportData, reportTitle, reportDescription]);
 
   const buildCurrentReportHtml = useCallback(() => {
     const input = buildCurrentReportExport();
@@ -1026,8 +1041,8 @@ export default function App() {
   const exportFullReportHtml = useCallback(() => {
     const html = buildCurrentReportHtml();
     if (!html) return;
-    downloadReportHtml(html);
-  }, [buildCurrentReportHtml]);
+    downloadReportHtml(html, reportExportFilename('html', reportTitle));
+  }, [buildCurrentReportHtml, reportTitle]);
 
   const exportFullReportPdf = useCallback(async () => {
     const input = buildCurrentReportExport();
@@ -1035,7 +1050,7 @@ export default function App() {
     setError(null);
     setReportPdfExporting(true);
     try {
-      await downloadReportPdf(input);
+      await downloadReportPdf(input, reportExportFilename('pdf', reportTitle));
     } catch (e) {
       setError(e instanceof Error ? e.message : 'PDF export failed');
     } finally {
@@ -1081,15 +1096,18 @@ export default function App() {
       setError('Select at least one object and one sensor in Steps 2–3 to export report config.');
       return;
     }
+    const title = (name?.trim() || reportTitle.trim() || DEFAULT_REPORT_TITLE);
     const config: ReportExportConfig = {
       objects: exportObjects,
       dateFrom: reportDateFrom,
       dateTo: reportDateTo,
+      title,
+      description: reportDescription.trim() || undefined,
     };
     const payload: ReportExportJson = {
       version: 1,
       exportedAt: new Date().toISOString(),
-      name: name?.trim() || undefined,
+      name: title,
       report: {
         config,
         ...(reportGenerated && reportData
@@ -1109,8 +1127,7 @@ export default function App() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    const safeName = (name?.trim().replace(/[^\w\s-]/g, '').replace(/\s+/g, '-') || 'report');
-    a.download = `sensoriqua-report-${safeName}-${new Date().toISOString().slice(0, 10)}.json`;
+    a.download = `sensoriqua-${reportFileSlug(title)}-${new Date().toISOString().slice(0, 10)}.json`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -1128,6 +1145,14 @@ export default function App() {
       }
       const dateFrom = typeof config.dateFrom === 'string' ? config.dateFrom : reportDateFrom;
       const dateTo = typeof config.dateTo === 'string' ? config.dateTo : reportDateTo;
+      const importedTitle =
+        (typeof config.title === 'string' && config.title.trim()) ||
+        (typeof (raw as ReportExportJson).name === 'string' && (raw as ReportExportJson).name?.trim()) ||
+        DEFAULT_REPORT_TITLE;
+      const importedDescription =
+        typeof config.description === 'string' ? config.description : '';
+      setReportTitle(importedTitle);
+      setReportDescription(importedDescription);
       setReportDateFrom(dateFrom);
       setReportDateTo(dateTo);
       setSelectedObjectIds(config.objects.map((o) => o.object_id));
@@ -1135,6 +1160,8 @@ export default function App() {
         objects: config.objects,
         dateFrom,
         dateTo,
+        title: importedTitle,
+        description: importedDescription,
         data: report?.data,
       });
       if (report?.data) {
@@ -2292,7 +2319,7 @@ export default function App() {
         <div className="reports-panel">
           <section className="reports-section">
             <div className="reports-section-header">
-              <h2 className="reports-section-title">Sensor reading report</h2>
+              <h2 className="reports-section-title">{reportTitle.trim() || DEFAULT_REPORT_TITLE}</h2>
               <div className="reports-section-actions">
                 <input
                   ref={reportImportInputRef}
@@ -2307,17 +2334,71 @@ export default function App() {
                 </button>
                 <button
                   type="button"
-                  className="btn-sm primary"
+                  className="btn-sm"
                   onClick={() => exportReportJson()}
-                  disabled={!selectedObjectIds.length || !Object.keys(selectedSensorsByObject).some((k) => (selectedSensorsByObject[Number(k)] ?? []).some((sl) => sl.sensor != null))}
+                  disabled={
+                    !selectedObjectIds.length ||
+                    !Object.keys(selectedSensorsByObject).some((k) =>
+                      (selectedSensorsByObject[Number(k)] ?? []).some((sl) => sl.sensor != null)
+                    )
+                  }
                 >
-                  Export
+                  Export JSON
+                </button>
+                <button
+                  type="button"
+                  className="btn-sm"
+                  onClick={exportFullReportHtml}
+                  disabled={!reportGenerated || !reportData || reportPdfExporting}
+                  aria-label="Export full report to HTML"
+                >
+                  Export HTML
+                </button>
+                <button
+                  type="button"
+                  className="btn-sm"
+                  onClick={() => void exportFullReportPdf()}
+                  disabled={!reportGenerated || !reportData || reportPdfExporting}
+                  aria-label="Export full report to PDF"
+                >
+                  {reportPdfExporting ? 'Exporting PDF…' : 'Export PDF'}
                 </button>
               </div>
             </div>
+            <div className="reports-placeholder-block report-meta-panel" role="group" aria-label="Report name and description">
+              <div className="report-meta-fields">
+                <div className="form-row report-meta-field">
+                  <label htmlFor="report-title">Report name</label>
+                  <input
+                    id="report-title"
+                    type="text"
+                    value={reportTitle}
+                    onChange={(e) => setReportTitle(e.target.value)}
+                    placeholder={DEFAULT_REPORT_TITLE}
+                    maxLength={200}
+                    aria-label="Report name"
+                  />
+                </div>
+                <div className="form-row report-meta-field report-meta-field--description">
+                  <label htmlFor="report-description">Description</label>
+                  <input
+                    id="report-description"
+                    type="text"
+                    value={reportDescription}
+                    onChange={(e) => setReportDescription(e.target.value)}
+                    placeholder="Optional notes for export"
+                    maxLength={2000}
+                    aria-label="Report description"
+                  />
+                </div>
+              </div>
+            </div>
             <p className="reports-section-desc">
-              Choose objects and sensors in Steps 2–3, set the timeframe in Step 4, then click Generate report. All selected sensors are shown as lines in the graph (Y scaled to fit); the table lists values by time.
+              Choose objects and sensors in Steps 2–3, set the timeframe in Step 4, then click Generate report. Name and description appear in exported HTML, PDF, and JSON.
             </p>
+            {reportDescription.trim() ? (
+              <p className="reports-preview-description">{reportDescription}</p>
+            ) : null}
             {reportGenerated && reportData ? (
               <>
                 {reportData.chartSeries.length > 0 && reportData.chartSeries.every((s) => s.data.length === 0) && (
@@ -2329,29 +2410,7 @@ export default function App() {
                   </div>
                 )}
                 <div className="reports-placeholder-block reports-chart-block">
-                  <div className="report-chart-block-header">
-                    <h3>Graph</h3>
-                    <div className="report-export-buttons">
-                      <button
-                        type="button"
-                        className="btn-sm primary"
-                        onClick={exportFullReportHtml}
-                        disabled={reportPdfExporting}
-                        aria-label="Export full report to HTML"
-                      >
-                        Export HTML
-                      </button>
-                      <button
-                        type="button"
-                        className="btn-sm"
-                        onClick={() => void exportFullReportPdf()}
-                        disabled={reportPdfExporting}
-                        aria-label="Export full report to PDF"
-                      >
-                        {reportPdfExporting ? 'Exporting PDF…' : 'Export PDF'}
-                      </button>
-                    </div>
-                  </div>
+                  <h3>Graph</h3>
                   <div ref={reportChartContainerRef} className="report-chart-resize-wrap">
                     <ReportChart
                       series={reportData.chartSeries}

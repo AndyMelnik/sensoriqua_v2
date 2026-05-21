@@ -1,17 +1,20 @@
 # Sensoriqua 2 — User Guide
 
-This guide describes how to use **Sensoriqua 2 (Dashboards and Reports)** for configuring sensors, building dashboards, and generating reports.
+This guide describes how to use **Sensoriqua 2 (Dashboards and Reports)** for configuring sensors, building dashboards, generating reports, and viewing fleet positions on a map.
 
 ---
 
 ## Overview
 
-The application has two main tabs:
+The application has three main tabs:
 
-- **Dashboards** — Configure sensors, build a live dashboard with panels, and optionally group panels. Export/import dashboard layout.
-- **Reports** — Select objects and sensors, set a timeframe, and generate a report with a graph and tables (raw data and summary by date).
+| Tab | Purpose |
+|-----|---------|
+| **Dashboards** | Configure sensors, build a live dashboard with panels, optional grouping. Export/import dashboard layout. |
+| **Reports** | Select objects and sensors, set a timeframe, generate a graph and tables (raw + summary). Export/import JSON, HTML, PDF; export tables to XLSX. |
+| **Map** | Filter units by business entity, optional telemetry conditions, show GPS on a map and in a sortable table. |
 
-Both tabs share the same left-panel workflow: filter by grouping → choose objects → choose and configure sensors.
+**Dashboards** and **Reports** share the same left-panel workflow: filter by grouping → choose objects → choose and configure sensors. **Map** uses its own three-step flow (entity → selection → conditions).
 
 ---
 
@@ -35,14 +38,15 @@ Both tabs share the same left-panel workflow: filter by grouping → choose obje
 - For each selected object, use **Select sensor** to pick one or more sensors (Input, State, or Tracking).
 - Click **Configure / Add** to set:
   - **Display label** (e.g. "Speed", "Fuel level")
-  - **MIN** and **MAX** thresholds (optional; used for green/red coloring)
+  - **MIN** and **MAX** thresholds (optional; used for green/red coloring on dashboard and threshold bands on sparklines)
   - **Multiplier** (e.g. 0.01 to scale values)
+  - **Mini-chart period** — last **1**, **2**, **4**, or **8 hours** of history for the sparkline in the configured list and on dashboard panels
 - Click **Add to configured list**. You can add several sensors per object via **+ Add sensor for this object**.
 
 ### Configured sensors (center)
 
-- Each card shows: object label, sensor label, sparkline (last hour), and actions.
-- **Edit** — Change label, MIN/MAX, or multiplier.
+- Each card shows: object label, sensor label, **interactive sparkline** (hover for time/value; min/max row under the chart), and actions.
+- **Edit** — Change label, MIN/MAX, multiplier, or mini-chart period.
 - **Add to dashboard** — Add this sensor to the dashboard (right side).
 - **Remove** — Remove from the configured list (you can add it again later from Step 3).
 
@@ -50,7 +54,7 @@ If the backend cannot save (e.g. app state DB unavailable), the app switches to 
 
 ### Dashboard (right)
 
-- Each panel shows: object label, sensor label, **latest value**, **timestamp**, and a sparkline.
+- Each panel shows: object label, sensor label, **latest value**, **timestamp**, and a sparkline (min/max under the chart; the large value in the panel header is the current reading).
   - **Green** = value within MIN/MAX; **red** = outside range.
 - **Expand** — Dashboard fills the window (hides header and side panels). **Collapse** to return.
 - **Update every** — Choose 30 sec, 1 min, or 5 min.
@@ -81,7 +85,14 @@ If the backend cannot save (e.g. app state DB unavailable), the app switches to 
 
 - **From** — Start date and time for the report.
 - **To** — End date and time.
-- The report will request data only within this range (or use "Try last 24 hours" if the range returns no data).
+- The report will request data only within this range (or use **Try last 24 hours** if the range returns no data).
+
+### Report name and description
+
+- Above the generated report, a card contains two single-line fields:
+  - **Report name** — Title for exports and the section heading (default: "Sensor reading report").
+  - **Description** — Optional notes (included in HTML, PDF, and JSON).
+- If description is non-empty, a preview line may appear below the help text before you generate the report.
 
 ### Generate report
 
@@ -97,37 +108,82 @@ If the backend cannot save (e.g. app state DB unavailable), the app switches to 
 - **Legend** — Each series has a label under the graph. **Click a label** to show or hide that line.
 - **Drag** on the graph — Zoom into the selected time range.
 - **Reset** — Restore the full time range (appears when zoomed).
-- **Export HTML** (top-right of graph) — Download a single HTML file with the graph, legend, Raw data table, and Summary table (landscape, print-friendly).
 
 ### Tables
 
 - **Search** — Filter rows by text.
 - **Sort** — Click a column header to sort (toggle ascending/descending).
 - **Rows per page** — 20, 50, or 100.
-- **Export XLSX** — Download the table data as an Excel file.
+- **Export XLSX** — Download the table as an Excel file (per table block).
 - **Pagination** — Previous/Next and page info below the table.
 
-### Export and Import report (JSON)
+### Export and Import (report section header)
 
-- **Export** (top right of the report section) — Downloads a JSON file with the current **report configuration**: selected objects, sensors (with multipliers), and timeframe (From/To). If a report has already been generated, the file also includes the **cached data** (graph series, raw table, summary table) so you can re-open the same report without re-fetching. The file name is `sensoriqua-report-<name>-<date>.json`. Export is disabled until at least one object and one sensor are selected in Steps 2–3.
-- **Import** — Choose a previously exported report JSON file. The app restores:
-  - **Timeframe** (Step 4 From/To).
-  - **Selected objects** and **sensors with multipliers** (Steps 2–3). Sensor slots are matched by object and by sensor `input_label` and `source`; if the backend has the same sensors for those objects, the left panel will show the same selection.
-  - If the file contained **cached data**, the graph and tables are shown immediately; otherwise you can click **Generate report** to load fresh data for the restored config.
+All main export actions are in the **top-right of the Reports panel** (next to the report title):
 
-Use export to save a report setup for later, share it with others, or keep a snapshot of the data (when the file includes the cached result).
+| Action | When available | Result |
+|--------|----------------|--------|
+| **Import** | Always | Restore report JSON (config ± cached data). |
+| **Export JSON** | At least one object and sensor selected in Steps 2–3 | Config + optional cached graph/tables. |
+| **Export HTML** | After **Generate report** | Single HTML file (graph, legend, both tables). |
+| **Export PDF** | After **Generate report** | PDF with title, description, chart, and tables (client-side). |
+
+- **Export JSON** includes **title**, **description**, selected objects/sensors (with multipliers), timeframe, and optionally **cached data** if the report was already generated. Filename: `sensoriqua-<name>-<date>.json`.
+- **Import** restores name, description, timeframe, object/sensor selection (matched by `input_label` and `sensor_source`), and displays cached data immediately if present; otherwise click **Generate report** again.
+
+Per-table **Export HTML** (inside a table toolbar) exports only that table when enabled.
 
 ### Data mode
 
-- By default, the backend returns **1-minute bucketed** data. When the API supports **raw** (unresampled) data, you can request it so the report uses every point (no averaging). The exact option is backend-dependent; the UI sends the request according to the chosen mode.
+- By default, the backend returns **1-minute bucketed** data. When the API supports **raw** (unresampled) data, the report can use every point. The UI sends the request according to the chosen mode.
+
+---
+
+## Map Tab
+
+Use the map to see **where units are** and optionally filter them by **latest telemetry** before refreshing positions.
+
+### Step 1 — Choose business entity
+
+Pick the dimension to start from:
+
+- **Objects** — Trackable units (object ↔ device).
+- **Vehicles** — Fleet assets linked via `vehicles.object_id`.
+- **Employees** — Drivers/staff assigned to objects.
+- **Departments** — Org units via employees on objects.
+- **Groups** / **Tags** — Business groupings and labels.
+- **Sensor types** — Types from sensor metadata plus state/tracking.
+- **Sensor names** — Distinct sensor names from telematics inputs; objects whose device has data for selected names.
+
+### Step 2 — Select values
+
+- Search and multi-select entities for the chosen type.
+- **Clear** / **Select all** / **Refresh** list.
+- **Empty selection** (for non-object types) = include all objects matching that entity type (no filter on Step 2).
+
+### Step 3 — Conditions (optional)
+
+- Add rules on latest **input** or **state** fields (loaded from telematics).
+- Operators: `>`, `<`, `=`, **between** (two values).
+- **All** conditions must pass for a unit to appear in the table/map scope.
+
+### Refresh and results
+
+- Click **Refresh** (footer) after defining scope in Steps 1–2.
+- **Live map** — Markers at latest GPS from tracking data; popup shows label, coordinates, speed, last update.
+- **Selected units table** (collapsible above the map):
+  - Columns: object metadata, optional condition values, lat/lon, last update, speed.
+  - Sort, search, show/hide columns, **Export XLSX**.
 
 ---
 
 ## Tips
 
-- **No data in report** — Try a shorter or different timeframe, or use "Try last 24 hours" if the app suggests it.
-- **Dashboard groups** — Use short, clear labels (e.g. "Engine", "Safety") so the framed sections stay readable.
-- **Dashboard Export/Import** — Export a dashboard after arranging panels and groups; keep the JSON file to restore the same layout later or on another machine (sensors must exist in the configured list or be resolvable by device/sensor).
-- **Report Export/Import** — Export a report config (and optionally the generated data) from the Reports tab; import to restore the same objects, sensors, multipliers, and timeframe, and optionally view the cached report without re-running Generate report.
+- **No data in report** — Try a shorter or different timeframe, or use **Try last 24 hours** if the app suggests it.
+- **Mini-chart period** — Use 2–8 hours on noisy or slow-changing sensors so the sparkline is easier to read.
+- **Dashboard groups** — Use short, clear labels (e.g. "Engine", "Safety") so framed sections stay readable.
+- **Dashboard Export/Import** — Export after arranging panels and groups; sensors must exist in the configured list or be resolvable by device/sensor.
+- **Report Export/Import** — Export config (and optionally generated data) to reopen the same report without re-fetching.
+- **Map conditions** — Add conditions only when you need to narrow units; leave Step 3 empty to show all units in scope.
 
 For configuration and deployment, see [CONFIGURATION.md](CONFIGURATION.md). For the API, see [API_OVERVIEW.md](API_OVERVIEW.md).

@@ -1,6 +1,6 @@
 # Sensoriqua 2 (Dashboards and Reports)
 
-Web UI for **dashboards** (configure and monitor telematics/IoT sensors) and **reports** (sensor reading graphs and tables over a chosen timeframe). Filter objects by **Groups**, **Tags**, or **Sensor type** → select objects → pick sensors → configure labels and thresholds. View configured sensors with sparklines, add them to a **dashboard** (with optional **grouping** and labels), and open **history charts**. In the **Reports** tab, choose objects and sensors, set a date range, and generate a multi-series **graph** plus **raw** and **summary** tables with export to XLSX and HTML. Supports **Navixy App Connect** (per-user auth and DB credentials) and **export/import** of dashboard layout (including groups).
+Web UI for **dashboards** (configure and monitor telematics/IoT sensors), **reports** (sensor reading graphs and tables over a chosen timeframe), and a **live map** (fleet positions with optional telemetry filters). Filter objects by **Groups**, **Tags**, or **Sensor type** → select objects → pick sensors → configure labels, thresholds, and mini-chart period. View configured sensors with interactive sparklines, add them to a **dashboard** (with optional **grouping** and labels), and open **history charts**. In **Reports**, set a date range and generate a multi-series **graph** plus **raw** and **summary** tables; export/import JSON, HTML, or PDF, and export tables to XLSX. Supports **Navixy App Connect** (per-user auth and DB credentials) and **export/import** of dashboard layout (including groups).
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -19,6 +19,8 @@ Web UI for **dashboards** (configure and monitor telematics/IoT sensors) and **r
    # Set DSN (or use .env, see below), then:
    psql "$SENSORIQUA_DSN" -f ../migrations/001_app_sensoriqua.sql
    psql "$SENSORIQUA_DSN" -f ../migrations/002_sensor_source.sql
+   psql "$SENSORIQUA_DSN" -f ../migrations/003_multiplier.sql
+   psql "$SENSORIQUA_DSN" -f ../migrations/004_sparkline_hours.sql
    ```
    Or run `python run_migrations.py` from `backend/` (see [migrations/README.md](migrations/README.md)).
 
@@ -65,25 +67,25 @@ To test the same build locally: run `./scripts/build-for-render.sh` from the rep
 
 ## Features
 
-The app has two main tabs: **Dashboards** and **Reports**.
+The app has three main tabs: **Dashboards**, **Reports**, and **Map**.
 
 ### Dashboards tab — Left panel (Steps 1–3)
 
 - **Step 1 – Filter by grouping:** Choose **Group**, **Tag**, or **Sensor type**. Multi-select items; objects matching any selection appear in Step 2. Leave all empty to see all objects. Search within each grouping.
 - **Step 2 – Objects:** List shows objects (with optional group/tag/department labels). Toggle view: flat list, by group, or by tag. Search by object label; select one or more objects.
-- **Step 3 – Sensors:** For each selected object, pick one or more sensors (Input, State, or Tracking). Config popup: **display label**, **MIN/MAX**, **multiplier** → **Add to configured list**.
+- **Step 3 – Sensors:** For each selected object, pick one or more sensors (Input, State, or Tracking). Config popup: **display label**, **MIN/MAX**, **multiplier**, **mini-chart period** (1 / 2 / 4 / 8 hours) → **Add to configured list**.
 
 ### Dashboards tab — Configured sensors and dashboard
 
-- List of configured sensors with object label, custom label, and **1-hour sparkline**. Optional MIN/MAX shown on sparkline.
-- **Edit** — change label or thresholds.
+- List of configured sensors with object label, custom label, and an **interactive sparkline** (hover for value/time; min/max stats). Mini-chart window follows **sparkline_hours** per sensor (default 1 hour).
+- **Edit** — change label, thresholds, multiplier, or mini-chart period.
 - **Add to dashboard** — add the sensor to the right-hand dashboard.
 - **Remove** — remove from configured list (soft delete).
 - If the backend returns an error when saving (e.g. app state DB unavailable), the app **switches to browser storage** for that session: configured list and dashboard are kept in **localStorage** (tagline shows “Saved in this browser”). Sparklines and latest values still use the API with the current list.
 
 ### Dashboard (right)
 
-- Panels for each added sensor: **object label**, **sensor label**, **latest value**, **timestamp**, and a sparkline. Values are **green** when within MIN/MAX, **red** when outside.
+- Panels for each added sensor: **object label**, **sensor label**, **latest value**, **timestamp**, and a sparkline (min/max under the chart; latest value shown in the panel header). Values are **green** when within MIN/MAX, **red** when outside.
 - **Expand** — make the dashboard fill the entire browser window (hides header and side panels). **Collapse** — return to normal layout.
 - **Update interval:** 30 sec, 1 min, or 5 min (configurable).
 - **Click a panel** to open a **history chart** (1, 4, 12, or 24 hours).
@@ -93,7 +95,20 @@ The app has two main tabs: **Dashboards** and **Reports**.
 
 ### Reports tab
 
-- **Steps 1–3** same as Dashboards; set a **multiplier** per sensor for report values. **Step 4 – Timeframe:** choose From and To date/time. **Generate report:** multi-series **graph** (drag-to-zoom, Reset, legend toggles to show/hide lines), **Raw data** table (by timestamp), **Summary** table (by date: Min, Max, Avg). **Export** / **Import** report as **JSON** (config and optional cached data). **Export HTML** (full report with graph and tables), **Export XLSX** per table, sort/search/pagination (20/50/100 rows). Data can be **raw** (unresampled) or 1-minute buckets.
+- **Steps 1–3** same as Dashboards; set a **multiplier** per sensor for report values. **Step 4 – Timeframe:** choose From and To date/time.
+- **Report name** and **Description** — single-line fields in a card above the report (included in JSON, HTML, and PDF export).
+- **Generate report:** multi-series **graph** (drag-to-zoom, Reset, legend toggles), **Raw data** table (by timestamp), **Summary** table (by date: Min, Max, Avg).
+- **Header actions:** **Import**, **Export JSON**, **Export HTML**, **Export PDF** (full report; PDF built client-side with jsPDF). Per-table **Export XLSX** uses ExcelJS (write-only). Tables support sort, search, and pagination (20/50/100 rows). Data can be **raw** (unresampled) or 1-minute buckets.
+
+### Map tab
+
+- **Step 1 – Business entity:** Filter starting point — **Objects**, **Vehicles**, **Employees**, **Departments**, **Groups**, **Tags**, **Sensor types**, or **Sensor names** (from telematics/business schema).
+- **Step 2 – Select values:** Multi-select entities (empty = all objects for that dimension). Search, Clear, Select all, Refresh.
+- **Step 3 – Conditions (optional):** Filter units by latest **input** or **state** telemetry (`>`, `<`, `=`, `between`); all conditions must pass.
+- **Refresh** — load GPS positions (`POST /api/map-positions`) and build the **Selected units table** (sort, filter, column visibility, Export XLSX).
+- **Live map** — OpenStreetMap markers with popups (label, coordinates, speed, last update). Collapsible table above the map.
+
+See **[docs/USER_GUIDE.md](docs/USER_GUIDE.md)** for step-by-step usage.
 
 ### Auth and data source
 
@@ -102,7 +117,7 @@ The app has two main tabs: **Dashboards** and **Reports**.
 
 ## Documentation
 
-- **[docs/USER_GUIDE.md](docs/USER_GUIDE.md)** — How to use Dashboards and Reports (steps, grouping, export/import).
+- **[docs/USER_GUIDE.md](docs/USER_GUIDE.md)** — How to use Dashboards, Reports, and Map (steps, grouping, export/import).
 - **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** — Stack, data flow, backend/frontend layout.
 - **[docs/CONFIGURATION.md](docs/CONFIGURATION.md)** — Environment variables, CORS, app state, production checklist.
 - **[docs/API_OVERVIEW.md](docs/API_OVERVIEW.md)** — API endpoints and dashboard JSON format.
@@ -110,7 +125,7 @@ The app has two main tabs: **Dashboards** and **Reports**.
 
 ## Schema
 
-- **app_sensoriqua.configured_sensors**: user_id, object_id, device_id, sensor_input_label, **sensor_source** (input | state | tracking), sensor_id, sensor_label_custom, min_threshold, max_threshold, multiplier, is_active, created_at, updated_at.
+- **app_sensoriqua.configured_sensors**: user_id, object_id, device_id, sensor_input_label, **sensor_source** (input | state | tracking), sensor_id, sensor_label_custom, min_threshold, max_threshold, multiplier, **sparkline_hours** (1 | 2 | 4 | 8, default 1), is_active, created_at, updated_at.
 - **app_sensoriqua.dashboard_planes**: user_id, configured_sensor_id, position_index. (Dashboard **group_id** and group labels are stored in the frontend and in exported JSON; see [API_OVERVIEW](docs/API_OVERVIEW.md).)
 
 **Telematics data (read-only):**
