@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 type Point = { ts: string; value: number | null };
 
@@ -32,6 +32,7 @@ export function Sparkline({
   showStats = true,
   showLastStat = true,
   interactive = true,
+  fillContainer = false,
 }: {
   data: Point[];
   width?: number;
@@ -47,8 +48,28 @@ export function Sparkline({
   showLastStat?: boolean;
   /** Hover crosshair and value label on the chart */
   interactive?: boolean;
+  /** Size chart to parent width (e.g. dashboard plane-spark at 15%) */
+  fillContainer?: boolean;
 }) {
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [containerWidth, setContainerWidth] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!fillContainer) return;
+    const el = containerRef.current;
+    if (!el) return;
+    const update = () => {
+      const w = el.clientWidth;
+      if (w > 0) setContainerWidth(Math.floor(w));
+    };
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [fillContainer]);
+
+  const chartWidth = fillContainer ? Math.max(containerWidth ?? width, 40) : width;
 
   const series = useMemo(
     () => data.filter((d) => d.value != null) as { ts: string; value: number }[],
@@ -68,7 +89,7 @@ export function Sparkline({
 
     const padX = 2;
     const padY = 2;
-    const plotW = width - padX * 2;
+    const plotW = chartWidth - padX * 2;
     const plotH = chartHeight - padY * 2;
 
     const yAt = (v: number) => padY + plotH - ((v - plotMin) / range) * plotH;
@@ -120,7 +141,7 @@ export function Sparkline({
       timeEnd,
       inRange,
     };
-  }, [series, data, width, chartHeight, showThresholds, min, max, stroke]);
+  }, [series, data, chartWidth, chartHeight, showThresholds, min, max, stroke]);
 
   const pickIndexFromEvent = useCallback(
     (clientX: number, svg: SVGSVGElement) => {
@@ -201,11 +222,15 @@ export function Sparkline({
   const ariaLabel = `Sparkline, ${series.length} points, minimum ${formatCompact(dataMin)}, maximum ${formatCompact(dataMax)}, latest ${formatCompact(last.value)}`;
 
   return (
-    <div className="sparkline-block">
+    <div
+      ref={fillContainer ? containerRef : undefined}
+      className={`sparkline-block${fillContainer ? ' sparkline-block--fill' : ''}`}
+      style={fillContainer ? { width: '100%' } : undefined}
+    >
       <div className="sparkline-body">
-        <div className="sparkline-chart-column" style={{ width }}>
+        <div className="sparkline-chart-column" style={{ width: chartWidth }}>
           <svg
-            width={width}
+            width={chartWidth}
             height={chartHeight}
             className={`sparkline-chart${interactive ? ' sparkline-chart-interactive' : ''}`}
             role="img"
@@ -229,7 +254,7 @@ export function Sparkline({
             {hasTh && min != null && (
               <line
                 x1={padX}
-                x2={width - padX}
+                x2={chartWidth - padX}
                 y1={thMinY!}
                 y2={thMinY!}
                 stroke="var(--muted)"
@@ -241,7 +266,7 @@ export function Sparkline({
             {hasTh && max != null && min !== max && (
               <line
                 x1={padX}
-                x2={width - padX}
+                x2={chartWidth - padX}
                 y1={thMaxY!}
                 y2={thMaxY!}
                 stroke="var(--muted)"

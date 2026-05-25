@@ -846,6 +846,69 @@ def list_sensors_for_object(
 
 # ---------- Configured sensors CRUD ----------
 
+def _fetch_configured_sensor_row(
+    conn: Any,
+    cfg: str,
+    uid: int,
+    configured_sensor_id: int,
+    dsn: str,
+    use_sqlite: bool,
+) -> dict[str, Any]:
+    """Load one active configured sensor; tolerate missing optional columns on older schemas."""
+    is_active = 1 if use_sqlite else True
+    try:
+        cur = conn.execute(
+            f"""
+            SELECT configured_sensor_id, object_id, device_id, sensor_input_label,
+                   sensor_source, sensor_id, sensor_label_custom, min_threshold, max_threshold,
+                   multiplier, sparkline_hours, created_at
+            FROM {cfg}
+            WHERE configured_sensor_id = %s AND user_id = %s AND is_active = {is_active}
+            """,
+            (configured_sensor_id, uid),
+        )
+        row = cur.fetchone()
+    except psycopg.errors.UndefinedColumn:
+        try:
+            cur = conn.execute(
+                f"""
+                SELECT configured_sensor_id, object_id, device_id, sensor_input_label,
+                       sensor_source, sensor_id, sensor_label_custom, min_threshold, max_threshold,
+                       multiplier, created_at
+                FROM {cfg}
+                WHERE configured_sensor_id = %s AND user_id = %s AND is_active = {is_active}
+                """,
+                (configured_sensor_id, uid),
+            )
+            row = cur.fetchone()
+            if row is not None:
+                row = {**dict(row), "sparkline_hours": 1}
+        except psycopg.errors.UndefinedColumn:
+            cur = conn.execute(
+                f"""
+                SELECT configured_sensor_id, object_id, device_id, sensor_input_label,
+                       sensor_id, sensor_label_custom, min_threshold, max_threshold, created_at
+                FROM {cfg}
+                WHERE configured_sensor_id = %s AND user_id = %s AND is_active = {is_active}
+                """,
+                (configured_sensor_id, uid),
+            )
+            row = cur.fetchone()
+            if row is not None:
+                row = {**dict(row), "sensor_source": "input", "multiplier": None, "sparkline_hours": 1}
+    if row is None:
+        raise HTTPException(404, "Configured sensor not found")
+    out = dict(row)
+    with get_conn(dsn) as pg:
+        cur2 = pg.execute(
+            "SELECT object_label FROM raw_business_data.objects WHERE object_id = %s",
+            (out["object_id"],),
+        )
+        ob = cur2.fetchone()
+    out["object_label"] = ob["object_label"] if ob else None
+    return out
+
+
 @app.get("/api/configured-sensors")
 def list_configured_sensors(ctx: RequestContext = Depends(_request_context)):
     uid = ctx.user_id
@@ -1084,14 +1147,32 @@ def update_configured_sensor(
             raise HTTPException(400, "No fields to update")
         updates.append(f"updated_at = {updated_at}")
         params.extend([configured_sensor_id, uid])
-        cur = conn.execute(
-            f"UPDATE {cfg} SET {', '.join(updates)} WHERE configured_sensor_id = %s AND user_id = %s RETURNING configured_sensor_id",
-            params,
-        )
+        try:
+            cur = conn.execute(
+                f"UPDATE {cfg} SET {', '.join(updates)} WHERE configured_sensor_id = %s AND user_id = %s",
+                params,
+            )
+        except psycopg.errors.UndefinedColumn:
+            safe_updates = []
+            safe_params: list[Any] = []
+            for clause, val in zip(updates[:-1], params[: len(params) - 2]):
+                col = clause.split(" = ")[0]
+                if col in ("multiplier", "sparkline_hours"):
+                    continue
+                safe_updates.append(clause)
+                safe_params.append(val)
+            if not safe_updates:
+                raise HTTPException(400, "No fields to update (schema missing optional columns)")
+            safe_updates.append(f"updated_at = {updated_at}")
+            safe_params.extend([configured_sensor_id, uid])
+            cur = conn.execute(
+                f"UPDATE {cfg} SET {', '.join(safe_updates)} WHERE configured_sensor_id = %s AND user_id = %s",
+                safe_params,
+            )
         if cur.rowcount == 0:
             raise HTTPException(404, "Configured sensor not found")
         conn.commit()
-    return {"ok": True}
+        return _fetch_configured_sensor_row(conn, cfg, uid, configured_sensor_id, dsn, use_sqlite)
 
 
 @app.delete("/api/configured-sensors/{configured_sensor_id:int}")

@@ -73,22 +73,22 @@ The app has three main tabs: **Dashboards**, **Reports**, and **Map**.
 
 - **Step 1 – Filter by grouping:** Choose **Group**, **Tag**, or **Sensor type**. Multi-select items; objects matching any selection appear in Step 2. Leave all empty to see all objects. Search within each grouping.
 - **Step 2 – Objects:** List shows objects (with optional group/tag/department labels). Toggle view: flat list, by group, or by tag. Search by object label; select one or more objects.
-- **Step 3 – Sensors:** For each selected object, pick one or more sensors (Input, State, or Tracking). Config popup: **display label**, **MIN/MAX**, **multiplier**, **mini-chart period** (1 / 2 / 4 / 8 hours) → **Add to configured list**.
+- **Step 3 – Sensors:** For each selected object, pick one or more sensors (Input, State, or Tracking). **Configure / Add** (or **Configure / Edit** if already configured): **display label**, **MIN/MAX**, **multiplier**, **mini-chart period** (1 / 2 / 4 / 8 hours) → save to configured list.
 
 ### Dashboards tab — Configured sensors and dashboard
 
-- List of configured sensors with object label, custom label, and an **interactive sparkline** (hover for value/time; min/max stats). Mini-chart window follows **sparkline_hours** per sensor (default 1 hour).
-- **Edit** — change label, thresholds, multiplier, or mini-chart period.
+- List of configured sensors with object label, custom label, and an **interactive sparkline** (192px wide; hover for value/time; min/max stats). Mini-chart window follows **sparkline_hours** per sensor (default 1 hour).
+- **Edit** (card action or **Configure / Edit** in Step 3) — update label, thresholds, multiplier, or mini-chart period; changes are saved via **PATCH** and reflected immediately on the card and dashboard.
 - **Add to dashboard** — add the sensor to the right-hand dashboard.
 - **Remove** — remove from configured list (soft delete).
 - If the backend returns an error when saving (e.g. app state DB unavailable), the app **switches to browser storage** for that session: configured list and dashboard are kept in **localStorage** (tagline shows “Saved in this browser”). Sparklines and latest values still use the API with the current list.
 
 ### Dashboard (right)
 
-- Panels for each added sensor: **object label**, **sensor label**, **latest value**, **timestamp**, and a sparkline (min/max under the chart; latest value shown in the panel header). Values are **green** when within MIN/MAX, **red** when outside.
+- Panels for each added sensor: **object label**, **sensor label**, **latest value**, **timestamp**, and a **144px** interactive sparkline (min/max under the chart; latest value in the panel header). Values are **green** when within MIN/MAX, **red** when outside.
 - **Expand** — make the dashboard fill the entire browser window (hides header and side panels). **Collapse** — return to normal layout.
 - **Update interval:** 30 sec, 1 min, or 5 min (configurable).
-- **Click a panel** to open a **history chart** (1, 4, 12, or 24 hours).
+- **Click a panel** to open an interactive **history chart** (1, 4, 12, or 24 hours): crosshair, value/time tooltip, MIN/MAX legend.
 - **Remove** a panel from the dashboard (sensor stays in configured list).
 - **Export** — download the current dashboard layout as JSON (plane IDs and order).
 - **Import** — load a dashboard from a previously exported JSON file (replaces current dashboard panels with the same configured_sensor_ids where applicable). Dashboard **grouping:** use **+** on a panel to assign a group label (panels in the same group appear in a framed section); **−** removes the panel from its group. Export/import JSON includes groups.

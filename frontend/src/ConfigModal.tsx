@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react';
 export type SparklineHours = 1 | 2 | 4 | 8;
 
 export type ConfigForm = {
+  configured_sensor_id?: number;
   object_id: number;
   object_label: string;
   device_id: number;
@@ -28,7 +29,16 @@ export function ConfigModal({
   onCancel: () => void;
 }) {
   const [form, setForm] = useState(initial);
-  useEffect(() => setForm(initial), [initial]);
+  const initialKey = [
+    initial.configured_sensor_id ?? 'new',
+    initial.object_id,
+    initial.device_id,
+    initial.sensor_input_label,
+    initial.sensor_source ?? 'input',
+  ].join(':');
+  useEffect(() => {
+    setForm(initial);
+  }, [initialKey]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -47,13 +57,20 @@ export function ConfigModal({
       alert('Multiplier must be a non-zero number');
       return;
     }
-    onSave({ ...form, min_threshold: form.min_threshold, max_threshold: form.max_threshold, multiplier: form.multiplier });
+    onSave({
+      ...form,
+      configured_sensor_id: form.configured_sensor_id,
+      sparkline_hours: form.sparkline_hours,
+      min_threshold: form.min_threshold,
+      max_threshold: form.max_threshold,
+      multiplier: form.multiplier,
+    });
   };
 
   return (
     <div className="modal-overlay" onClick={onCancel}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h3>Configure sensor</h3>
+        <h3>{isEdit ? 'Edit configured sensor' : 'Configure sensor'}</h3>
         <form onSubmit={handleSubmit}>
           <div className="form-row">
             <label>Object</label>

@@ -45,7 +45,7 @@ Schema names and table names used in SQL are fixed or derived from `app_state_ta
 
 ## Frontend layout
 
-- **`App.tsx`** — Root component: tabs (**Dashboards** / **Reports** / **Map**), left panel workflows, configured sensors, dashboard grid (with grouping), report chart and tables, modals (config, group, export, confirm, history, debug).
+- **`App.tsx`** — Root component: tabs (**Dashboards** / **Reports** / **Map**), left panel workflows, configured sensors (configure/edit/upsert by sensor identity), dashboard grid (with grouping), report chart and tables, modals (config, group, export, confirm, history, debug).
 - **`api.ts`** — API client: DSN, auth token, localStorage for configured sensors, dashboard planes, dashboard groups and assignments; all `/api/*` calls.
 - **`MapTab.tsx`** — Map tab: entity filter, object scope, telemetry conditions, `POST /api/map-positions`, table + map.
 - **`UnitsMap.tsx`** / **`MapUnitsTable.tsx`** — Leaflet map and sortable/filterable units table with XLSX export.
@@ -53,7 +53,7 @@ Schema names and table names used in SQL are fixed or derived from `app_state_ta
 - **`ReportTable.tsx`** — Sortable, filterable, paginated table; Export XLSX / optional Export HTML.
 - **`reportExport.ts`** — Shared HTML builder; PDF via jsPDF + autotable; filenames from report title.
 - **`exportXlsx.ts`** — ExcelJS write-only helper for table downloads (replaces legacy `xlsx` / SheetJS).
-- **`Sparkline.tsx`** / **`HistoryChart.tsx`** — Mini charts (configurable 1–8 h via API) with hover stats; full history modal for dashboard.
+- **`Sparkline.tsx`** / **`HistoryChart.tsx`** — Mini charts (configurable 1–8 h via API) with hover stats; dashboard plane sparkline fixed at **144px**; history modal with crosshair, tooltip, and threshold legend.
 - **`ConfigModal.tsx`** / **`AccordionStep.tsx`** — Config form (incl. `sparkline_hours`) and collapsible steps.
 
 State: React useState/useCallback/useRef; report data and chart size from API and ResizeObserver. No global store.

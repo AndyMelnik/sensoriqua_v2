@@ -36,17 +36,17 @@ The application has three main tabs:
 ### Step 3 — Sensors & configure
 
 - For each selected object, use **Select sensor** to pick one or more sensors (Input, State, or Tracking).
-- Click **Configure / Add** to set:
+- Click **Configure / Add** (or **Configure / Edit** if that sensor is already in the configured list) to set:
   - **Display label** (e.g. "Speed", "Fuel level")
   - **MIN** and **MAX** thresholds (optional; used for green/red coloring on dashboard and threshold bands on sparklines)
   - **Multiplier** (e.g. 0.01 to scale values)
   - **Mini-chart period** — last **1**, **2**, **4**, or **8 hours** of history for the sparkline in the configured list and on dashboard panels
-- Click **Add to configured list**. You can add several sensors per object via **+ Add sensor for this object**.
+- Click **Add** or **Save**. Re-opening **Configure / Edit** for the same object and sensor updates the existing entry (no duplicate).
 
 ### Configured sensors (center)
 
 - Each card shows: object label, sensor label, **interactive sparkline** (hover for time/value; min/max row under the chart), and actions.
-- **Edit** — Change label, MIN/MAX, multiplier, or mini-chart period.
+- **Edit** — Change label, MIN/MAX, multiplier, or mini-chart period; click **Save** to persist (API or browser storage). The card and dashboard panels update with the new thresholds and mini-chart period.
 - **Add to dashboard** — Add this sensor to the dashboard (right side).
 - **Remove** — Remove from the configured list (you can add it again later from Step 3).
 
@@ -54,11 +54,11 @@ If the backend cannot save (e.g. app state DB unavailable), the app switches to 
 
 ### Dashboard (right)
 
-- Each panel shows: object label, sensor label, **latest value**, **timestamp**, and a sparkline (min/max under the chart; the large value in the panel header is the current reading).
+- Each panel shows: object label, sensor label, **latest value**, **timestamp**, and a **144px** sparkline (min/max under the chart; the large value in the panel header is the current reading).
   - **Green** = value within MIN/MAX; **red** = outside range.
 - **Expand** — Dashboard fills the window (hides header and side panels). **Collapse** to return.
 - **Update every** — Choose 30 sec, 1 min, or 5 min.
-- **Click a panel** — Opens a **history chart** (1, 4, 12, or 24 hours).
+- **Click a panel** — Opens an interactive **history chart** (1, 4, 12, or 24 hours): move the cursor over the graph for crosshair lines, value and time tooltip, min/max/latest stats, and a legend for the sensor line plus MIN/MAX thresholds (green = in range).
 - **×** on a panel — Removes it from the dashboard (sensor remains in the configured list).
 
 #### Grouping panels
@@ -180,6 +180,7 @@ Pick the dimension to start from:
 ## Tips
 
 - **No data in report** — Try a shorter or different timeframe, or use **Try last 24 hours** if the app suggests it.
+- **Editing configured sensors** — Use **Edit** on the card or **Configure / Edit** in Step 3 for the same sensor; both save MIN/MAX, multiplier, and mini-chart period.
 - **Mini-chart period** — Use 2–8 hours on noisy or slow-changing sensors so the sparkline is easier to read.
 - **Dashboard groups** — Use short, clear labels (e.g. "Engine", "Safety") so framed sections stay readable.
 - **Dashboard Export/Import** — Export after arranging panels and groups; sensors must exist in the configured list or be resolvable by device/sensor.

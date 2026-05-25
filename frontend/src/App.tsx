@@ -56,9 +56,88 @@ type ConfiguredSensor = {
 };
 
 function normalizeSparklineHours(h: unknown): api.SparklineHours {
-  const n = typeof h === 'number' ? h : 1;
+  const n = typeof h === 'number' ? h : Number(h);
   if (n === 2 || n === 4 || n === 8) return n;
   return 1;
+}
+
+function normalizeConfiguredId(id: unknown): number {
+  const n = typeof id === 'number' ? id : Number(id);
+  return Number.isFinite(n) ? n : -Date.now();
+}
+
+function normalizeConfiguredFromApi(row: Record<string, unknown>): ConfiguredSensor {
+  return {
+    configured_sensor_id: normalizeConfiguredId(row.configured_sensor_id),
+    object_id: Number(row.object_id),
+    device_id: Number(row.device_id),
+    sensor_input_label: String(row.sensor_input_label ?? ''),
+    sensor_source: (row.sensor_source as string) || 'input',
+    sensor_label_custom: String(row.sensor_label_custom ?? ''),
+    min_threshold: row.min_threshold != null && row.min_threshold !== '' ? Number(row.min_threshold) : null,
+    max_threshold: row.max_threshold != null && row.max_threshold !== '' ? Number(row.max_threshold) : null,
+    multiplier: row.multiplier != null && row.multiplier !== '' ? Number(row.multiplier) : null,
+    sparkline_hours: normalizeSparklineHours(row.sparkline_hours),
+    object_label: String(row.object_label ?? ''),
+    created_at: row.created_at != null ? String(row.created_at) : undefined,
+  };
+}
+
+function mergeConfiguredList(list: ConfiguredSensor[], patch: ConfiguredSensor): ConfiguredSensor[] {
+  const id = patch.configured_sensor_id;
+  const has = list.some((c) => normalizeConfiguredId(c.configured_sensor_id) === id);
+  if (has) {
+    return list.map((c) =>
+      normalizeConfiguredId(c.configured_sensor_id) === id ? { ...c, ...patch } : c
+    );
+  }
+  return [patch, ...list];
+}
+
+function findConfiguredForSensor(
+  list: ConfiguredSensor[],
+  objectId: number,
+  deviceId: number,
+  sensorInputLabel: string,
+  sensorSource?: string
+): ConfiguredSensor | undefined {
+  const source = sensorSource || 'input';
+  return list.find(
+    (c) =>
+      c.object_id === objectId &&
+      c.device_id === deviceId &&
+      c.sensor_input_label === sensorInputLabel &&
+      (c.sensor_source || 'input') === source
+  );
+}
+
+function configuredIdsEqual(a: unknown, b: unknown): boolean {
+  return normalizeConfiguredId(a) === normalizeConfiguredId(b);
+}
+
+function configuredSensorFromForm(
+  form: ConfigForm,
+  minVal: number | null,
+  maxVal: number | null,
+  multVal: number | null,
+  sparklineHours: api.SparklineHours,
+  existing?: ConfiguredSensor
+): ConfiguredSensor {
+  const source = (form.sensor_source as 'input' | 'state' | 'tracking') || 'input';
+  return {
+    configured_sensor_id: existing?.configured_sensor_id ?? form.configured_sensor_id ?? -Date.now(),
+    object_id: form.object_id,
+    device_id: form.device_id,
+    sensor_input_label: form.sensor_input_label,
+    sensor_source: source,
+    sensor_label_custom: form.sensor_label_custom,
+    min_threshold: minVal,
+    max_threshold: maxVal,
+    multiplier: multVal,
+    sparkline_hours: sparklineHours,
+    object_label: form.object_label,
+    created_at: existing?.created_at,
+  };
 }
 type DashboardPlane = {
   dashboard_plane_id: number;
@@ -322,7 +401,7 @@ export default function App() {
   const loadConfigured = useCallback(async () => {
     setError(null);
     if (useLocalConfig) {
-      const list = api.getLocalConfiguredSensors() as ConfiguredSensor[];
+      const list = (api.getLocalConfiguredSensors() as Record<string, unknown>[]).map(normalizeConfiguredFromApi);
       setConfigured(list);
       return;
     }
@@ -332,16 +411,18 @@ export default function App() {
         const local = api.getLocalConfiguredSensors() as ConfiguredSensor[];
         if (local.length > 0) {
           setUseLocalConfig(true);
-          setConfigured(local);
+          setConfigured(local.map(normalizeConfiguredFromApi));
           return;
         }
       }
-      setConfigured(list);
+      const normalized = (list as Record<string, unknown>[]).map(normalizeConfiguredFromApi);
+      setConfigured(normalized);
+      api.setLocalConfiguredSensors(normalized);
     } catch (e) {
       const is503 = e instanceof api.ApiError && e.debug?.status === 503;
       if (is503) {
         setUseLocalConfig(true);
-        const list = api.getLocalConfiguredSensors() as ConfiguredSensor[];
+        const list = (api.getLocalConfiguredSensors() as Record<string, unknown>[]).map(normalizeConfiguredFromApi);
         setConfigured(list);
         setError(null);
       } else {
@@ -502,9 +583,38 @@ export default function App() {
     setSelectedObjectIds(filteredObjects.map((o) => o.id));
   };
 
+  const openEditModal = (c: ConfiguredSensor) => {
+    setEditingConfigId(c.configured_sensor_id);
+    setConfigModal({
+      configured_sensor_id: c.configured_sensor_id,
+      object_id: c.object_id,
+      object_label: c.object_label,
+      device_id: c.device_id,
+      sensor_input_label: c.sensor_input_label,
+      sensor_source: c.sensor_source || 'input',
+      sensor_label: c.sensor_input_label,
+      sensor_label_custom: c.sensor_label_custom,
+      min_threshold: c.min_threshold != null ? String(c.min_threshold) : '',
+      max_threshold: c.max_threshold != null ? String(c.max_threshold) : '',
+      multiplier: c.multiplier != null ? String(c.multiplier) : '',
+      sparkline_hours: normalizeSparklineHours(c.sparkline_hours),
+    });
+  };
+
   const openConfigModal = (obj: ObjectItem, sensor: SensorItem) => {
-    setEditingConfigId(null);
     const source = sensor.source || 'input';
+    const existing = findConfiguredForSensor(
+      configured,
+      obj.id,
+      obj.device_id,
+      sensor.input_label,
+      source
+    );
+    if (existing) {
+      openEditModal(existing);
+      return;
+    }
+    setEditingConfigId(null);
     setConfigModal({
       object_id: obj.id,
       object_label: obj.label,
@@ -520,23 +630,6 @@ export default function App() {
     });
   };
 
-  const openEditModal = (c: ConfiguredSensor) => {
-    setEditingConfigId(c.configured_sensor_id);
-    setConfigModal({
-      object_id: c.object_id,
-      object_label: c.object_label,
-      device_id: c.device_id,
-      sensor_input_label: c.sensor_input_label,
-      sensor_source: c.sensor_source || 'input',
-      sensor_label: c.sensor_input_label,
-      sensor_label_custom: c.sensor_label_custom,
-      min_threshold: c.min_threshold != null ? String(c.min_threshold) : '',
-      max_threshold: c.max_threshold != null ? String(c.max_threshold) : '',
-      multiplier: c.multiplier != null ? String(c.multiplier) : '',
-      sparkline_hours: normalizeSparklineHours(c.sparkline_hours),
-    });
-  };
-
   const handleConfigSave = async (form: ConfigForm) => {
     setError(null);
     setDebugInfo(null);
@@ -545,61 +638,95 @@ export default function App() {
     const multVal = form.multiplier.trim() ? parseFloat(form.multiplier) : null;
     const source = (form.sensor_source as 'input' | 'state' | 'tracking') || 'input';
     const sparklineHours = form.sparkline_hours;
+    const existingBySlot = findConfiguredForSensor(
+      configured,
+      form.object_id,
+      form.device_id,
+      form.sensor_input_label,
+      source
+    );
+    const editIdRaw =
+      form.configured_sensor_id ??
+      editingConfigId ??
+      existingBySlot?.configured_sensor_id ??
+      null;
+    const editId = editIdRaw != null ? normalizeConfiguredId(editIdRaw) : null;
+
+    const applyConfiguredPatch = (list: ConfiguredSensor[]): ConfiguredSensor[] => {
+      if (!editId) return list;
+      const has = list.some((c) => configuredIdsEqual(c.configured_sensor_id, editId));
+      const row = configuredSensorFromForm(form, minVal, maxVal, multVal, sparklineHours, existingBySlot);
+      row.configured_sensor_id = editId;
+      if (has) {
+        return list.map((c) => (configuredIdsEqual(c.configured_sensor_id, editId) ? { ...c, ...row } : c));
+      }
+      return [...list, row];
+    };
+
+    const syncDashboardThresholds = (id: number) => {
+      const patchPlane = (p: DashboardPlane): DashboardPlane =>
+        configuredIdsEqual(p.configured_sensor_id, id)
+          ? {
+              ...p,
+              sensor_label_custom: form.sensor_label_custom,
+              min_threshold: minVal,
+              max_threshold: maxVal,
+              multiplier: multVal,
+            }
+          : p;
+      if (useLocalConfig) {
+        const planes = api.getLocalDashboardPlanes() as DashboardPlane[];
+        api.setLocalDashboardPlanes(planes.map(patchPlane));
+      } else {
+        setDashboardPlanes((prev) => applyGroupsToPlanes(prev.map(patchPlane)));
+      }
+    };
 
     if (useLocalConfig) {
-      const list = api.getLocalConfiguredSensors() as ConfiguredSensor[];
-      if (editingConfigId) {
-        const out = list.map((c) =>
-          c.configured_sensor_id === editingConfigId
-            ? { ...c, sensor_label_custom: form.sensor_label_custom, min_threshold: minVal, max_threshold: maxVal, multiplier: multVal, sparkline_hours: sparklineHours }
-            : c
-        );
-        api.setLocalConfiguredSensors(out);
-      } else {
-        const localId = -Date.now();
-        list.push({
-          configured_sensor_id: localId,
-          object_id: form.object_id,
-          device_id: form.device_id,
-          sensor_input_label: form.sensor_input_label,
-          sensor_source: source,
-          sensor_label_custom: form.sensor_label_custom,
-          min_threshold: minVal,
-          max_threshold: maxVal,
-          multiplier: multVal,
-          sparkline_hours: sparklineHours,
-          object_label: form.object_label,
-        });
-        api.setLocalConfiguredSensors(list);
-      }
+      const list = applyConfiguredPatch(api.getLocalConfiguredSensors() as ConfiguredSensor[]);
+      api.setLocalConfiguredSensors(list);
+      setConfigured(list);
       setConfigModal(null);
       setEditingConfigId(null);
-      loadConfigured();
-      if (editingConfigId) {
-        const planes = api.getLocalDashboardPlanes() as DashboardPlane[];
-        const updated = planes.map((p) =>
-          p.configured_sensor_id === editingConfigId
-            ? { ...p, min_threshold: minVal, max_threshold: maxVal, multiplier: multVal }
-            : p
-        );
-        api.setLocalDashboardPlanes(updated);
-      }
+      if (editId) syncDashboardThresholds(editId);
       loadDashboard();
-      setHistoryPlane((prev) => (prev && prev.configured_sensor_id === editingConfigId ? { ...prev, min_threshold: minVal, max_threshold: maxVal, multiplier: multVal } : prev));
+      setHistoryPlane((prev) =>
+        prev && editId != null && configuredIdsEqual(prev.configured_sensor_id, editId)
+          ? { ...prev, min_threshold: minVal, max_threshold: maxVal, multiplier: multVal, sensor_label_custom: form.sensor_label_custom }
+          : prev
+      );
       return;
     }
 
     try {
-      if (editingConfigId) {
-        await api.updateConfiguredSensor(editingConfigId, {
+      if (editId != null && editId > 0) {
+        const updated = await api.updateConfiguredSensor(editId, {
           sensor_label_custom: form.sensor_label_custom,
           min_threshold: minVal,
           max_threshold: maxVal,
           multiplier: multVal,
           sparkline_hours: sparklineHours,
         });
+        const patch = normalizeConfiguredFromApi(updated as Record<string, unknown>);
+        setConfigured((prev) => mergeConfiguredList(prev, patch));
+        api.setLocalConfiguredSensors(
+          mergeConfiguredList(
+            (api.getLocalConfiguredSensors() as Record<string, unknown>[]).map(normalizeConfiguredFromApi),
+            patch
+          )
+        );
+      } else if (editId != null && editId < 0) {
+        const patch = configuredSensorFromForm(form, minVal, maxVal, multVal, sparklineHours, existingBySlot);
+        patch.configured_sensor_id = editId;
+        const list = mergeConfiguredList(
+          (api.getLocalConfiguredSensors() as Record<string, unknown>[]).map(normalizeConfiguredFromApi),
+          patch
+        );
+        api.setLocalConfiguredSensors(list);
+        setUseLocalConfig(true);
+        setConfigured(list);
       } else {
-        await api.addConfiguredSensor({
+        const created = await api.addConfiguredSensor({
           object_id: form.object_id,
           device_id: form.device_id,
           sensor_input_label: form.sensor_input_label,
@@ -610,54 +737,40 @@ export default function App() {
           multiplier: multVal,
           sparkline_hours: sparklineHours,
         });
+        const row = normalizeConfiguredFromApi(created as Record<string, unknown>);
+        setConfigured((prev) => mergeConfiguredList(prev, row));
+        api.setLocalConfiguredSensors(
+          mergeConfiguredList(
+            (api.getLocalConfiguredSensors() as Record<string, unknown>[]).map(normalizeConfiguredFromApi),
+            row
+          )
+        );
       }
       setConfigModal(null);
       setEditingConfigId(null);
-      await loadConfigured();
       await loadDashboard();
-      setHistoryPlane((prev) => (prev && prev.configured_sensor_id === editingConfigId ? { ...prev, min_threshold: minVal, max_threshold: maxVal, multiplier: multVal } : prev));
+      if (editId != null) syncDashboardThresholds(editId);
+      setHistoryPlane((prev) =>
+        prev && editId != null && configuredIdsEqual(prev.configured_sensor_id, editId)
+          ? { ...prev, min_threshold: minVal, max_threshold: maxVal, multiplier: multVal, sensor_label_custom: form.sensor_label_custom }
+          : prev
+      );
     } catch (e) {
       const is503 = e instanceof api.ApiError && e.debug?.status === 503;
       if (is503) {
         setUseLocalConfig(true);
-        const list = api.getLocalConfiguredSensors() as ConfiguredSensor[];
-        if (editingConfigId) {
-          const out = list.map((c) =>
-            c.configured_sensor_id === editingConfigId
-              ? { ...c, sensor_label_custom: form.sensor_label_custom, min_threshold: minVal, max_threshold: maxVal, multiplier: multVal, sparkline_hours: sparklineHours }
-              : c
-          );
-          api.setLocalConfiguredSensors(out);
-        } else {
-          list.push({
-            configured_sensor_id: -Date.now(),
-            object_id: form.object_id,
-            device_id: form.device_id,
-            sensor_input_label: form.sensor_input_label,
-            sensor_source: source,
-            sensor_label_custom: form.sensor_label_custom,
-            min_threshold: minVal,
-            max_threshold: maxVal,
-            multiplier: multVal,
-            sparkline_hours: sparklineHours,
-            object_label: form.object_label,
-          });
-          api.setLocalConfiguredSensors(list);
-        }
+        const list = applyConfiguredPatch(api.getLocalConfiguredSensors() as ConfiguredSensor[]);
+        api.setLocalConfiguredSensors(list);
+        setConfigured(list);
         setConfigModal(null);
         setEditingConfigId(null);
-        setConfigured(api.getLocalConfiguredSensors() as ConfiguredSensor[]);
-        if (editingConfigId) {
-          const planes = api.getLocalDashboardPlanes() as DashboardPlane[];
-          const updated = planes.map((p) =>
-            p.configured_sensor_id === editingConfigId
-              ? { ...p, min_threshold: minVal, max_threshold: maxVal, multiplier: multVal }
-              : p
-          );
-          api.setLocalDashboardPlanes(updated);
-        }
+        if (editId) syncDashboardThresholds(editId);
         loadDashboard();
-        setHistoryPlane((prev) => (prev && prev.configured_sensor_id === editingConfigId ? { ...prev, min_threshold: minVal, max_threshold: maxVal, multiplier: multVal } : prev));
+        setHistoryPlane((prev) =>
+          prev && editId != null && configuredIdsEqual(prev.configured_sensor_id, editId)
+            ? { ...prev, min_threshold: minVal, max_threshold: maxVal, multiplier: multVal, sensor_label_custom: form.sensor_label_custom }
+            : prev
+        );
         return;
       }
       const is404Configured =
@@ -1832,7 +1945,16 @@ export default function App() {
                         disabled={!slot.sensor}
                         onClick={() => slot.sensor && openConfigModal(obj, slot.sensor)}
                       >
-                        Configure / Add
+                        {slot.sensor &&
+                        findConfiguredForSensor(
+                          configured,
+                          obj.id,
+                          obj.device_id,
+                          slot.sensor.input_label,
+                          slot.sensor.source
+                        )
+                          ? 'Configure / Edit'
+                          : 'Configure / Add'}
                       </button>
                     </div>
                   ))}
@@ -2034,7 +2156,7 @@ export default function App() {
                     <div className="plane-spark">
                       <Sparkline
                         data={data}
-                        width={192}
+                        width={144}
                         chartHeight={34}
                         showThresholds
                         min={p.min_threshold}
@@ -2489,11 +2611,12 @@ export default function App() {
               ) : (
                 <HistoryChart
                   data={historyData}
-                  width={520}
-                  height={220}
+                  width={580}
+                  height={260}
                   showThresholds
                   min={historyPlane.min_threshold}
                   max={historyPlane.max_threshold}
+                  seriesLabel={historyPlane.sensor_label_custom}
                 />
               )}
             </div>

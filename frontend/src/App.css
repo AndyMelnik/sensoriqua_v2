@@ -2028,7 +2028,8 @@ body {
 .plane-spark {
   margin-top: auto;
   flex-shrink: 0;
-  width: 100%;
+  width: 144px;
+  align-self: center;
   display: flex;
   flex-direction: column;
   justify-content: flex-end;
@@ -2037,12 +2038,19 @@ body {
   overflow: visible;
 }
 
-.plane-spark .sparkline-block {
-  width: 100%;
-}
-
 .plane-spark .sparkline-body {
   justify-content: center;
+}
+
+.plane-spark .sparkline-stats,
+.plane-spark .sparkline-time {
+  font-size: 0.65rem;
+}
+
+.plane-spark .sparkline-legend {
+  flex-wrap: wrap;
+  gap: 0.25rem 0.4rem;
+  font-size: 0.6rem;
 }
 
 .plane-remove {
@@ -2115,14 +2123,14 @@ body {
 }
 
 .history-modal {
-  max-width: 640px;
+  max-width: 680px;
 }
 
 .history-chart-wrap {
   margin: 0.5rem 0;
-  min-height: 200px;
+  min-height: 220px;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: flex-start;
   overflow: visible;
 }
@@ -2130,6 +2138,123 @@ body {
 .history-chart-wrap svg.history-chart {
   flex-shrink: 0;
   overflow: visible;
+}
+
+.history-chart-interactive {
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.history-chart-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  width: 100%;
+}
+
+.history-chart-main {
+  width: 100%;
+  overflow: visible;
+}
+
+.history-chart-tooltip-value {
+  font: 600 12px system-ui, sans-serif;
+  fill: var(--text);
+}
+
+.history-chart-tooltip-time {
+  font: 11px system-ui, sans-serif;
+  fill: var(--muted);
+}
+
+.history-chart-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem 1.1rem;
+  font-size: 0.82rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+.history-chart-stat {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.35rem;
+}
+
+.history-chart-stat-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.history-chart-stat-active {
+  font-weight: 600;
+}
+
+.history-chart-stat-time {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.history-chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1rem;
+  padding: 0.45rem 0.55rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 0.8rem;
+}
+
+.history-chart-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--muted);
+}
+
+.history-chart-legend-label strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.history-chart-legend-line {
+  display: inline-block;
+  width: 18px;
+  height: 3px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.history-chart-legend-line-series {
+  height: 3px;
+}
+
+.history-chart-legend-line-threshold {
+  height: 0;
+  border-top: 2px dashed #94a3b8;
+  background: none;
+}
+
+.history-chart-legend-swatch {
+  width: 14px;
+  height: 10px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.history-chart-legend-swatch-ok {
+  background: rgba(34, 197, 94, 0.25);
+  border: 1px solid rgba(34, 197, 94, 0.5);
+}
+
+.history-chart-legend-ok .history-chart-legend-label {
+  color: var(--text);
 }
 
 .history-chart-empty {

@@ -23,7 +23,7 @@ Summary of the main HTTP API used by the frontend. Full OpenAPI spec is availabl
 | GET | /api/objects/{id}/sensors | Sensors for one object; optional search, include_type_and_params. |
 | GET | /api/configured-sensors | List configured sensors for current user. |
 | POST | /api/configured-sensors | Create; body: object_id, device_id, sensor_input_label, sensor_source, sensor_label_custom, min_threshold, max_threshold, multiplier, sparkline_hours (1\|2\|4\|8, default 1). |
-| PATCH | /api/configured-sensors/{id} | Update; body: sensor_label_custom, min_threshold, max_threshold, multiplier, sparkline_hours. |
+| PATCH | /api/configured-sensors/{id} | Update; body: sensor_label_custom, min_threshold, max_threshold, multiplier, sparkline_hours. Returns the **updated configured sensor** (same fields as list/create). |
 | DELETE | /api/configured-sensors/{id} | Soft-delete (is_active = false). |
 | GET | /api/dashboard-planes | List dashboard planes for current user (with object_label, thresholds, multiplier). |
 | POST | /api/dashboard-planes | Add plane; body: configured_sensor_id, position_index. |
@@ -34,6 +34,8 @@ Summary of the main HTTP API used by the frontend. Full OpenAPI spec is availabl
 | GET | /api/map-condition-fields | Distinct **sensor_name** from `raw_telematics_data.inputs` and **state_name** from `raw_telematics_data.states` (for map condition pickers). |
 | POST | /api/map-positions | Body: `{ "device_ids": [ 1, 2, 3 ] }`. Returns latest **lat, lon, ts, speed** per device from the **last row** in `tracking_data_core` (ORDER BY device_time DESC), so lat and lon come from the same GPS fix. |
 | POST | /api/sensor-history | Body: device_id, sensor_input_label, sensor_source?, hours? (1\|4\|12\|24), from_ts?, to_ts?, raw? (unresampled). Returns { series: [ { ts, value }, ... ] }. |
+
+**Configured sensor update:** `PATCH` returns the full row (including `object_label` from the business DB). The UI merges this into the list and syncs **localStorage** when the API is available. If optional columns are missing on an older Postgres schema, the backend still updates the available fields.
 
 **Map / business mapping (groupings + objects):** `vehicles` lists fleet rows (`vehicles.object_id` → objects). `employees` lists staff with an object assignment. `sensor_names` lists distinct `sensor_description` rows (`sensor_id` + label). Object filters use `vehicle_ids` / `employee_ids` / `sensor_ids` via EXISTS joins on `vehicles`, `employees`, and `sensor_description` respectively.
 
