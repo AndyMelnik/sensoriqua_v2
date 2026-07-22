@@ -1,5 +1,7 @@
 import { useState, useMemo } from 'react';
+import { SENSORIQUA_LOGO_DATA_URI } from './brandAssets';
 import { downloadXlsxFile } from './exportXlsx';
+import { sanitizeChartHtml } from './sanitizeHtml';
 
 export type ReportTableColumn = { key: string; label: string };
 export type ReportTableRow = { ts?: string; date?: string; [key: string]: string | number | null | undefined };
@@ -84,7 +86,7 @@ export function ReportTable({
   };
 
   const exportHtml = () => {
-    const chartSection = onExportHtml?.() ?? chartSvgHtml ?? '';
+    const chartSection = sanitizeChartHtml(onExportHtml?.() ?? chartSvgHtml ?? '');
     const tableRows = sortedRows
       .map(
         (row) =>
@@ -102,6 +104,9 @@ export function ReportTable({
     html, body { margin: 0; padding: 0; }
     body { font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: transparent; color: #0f172a; padding: 0.75rem 1rem; }
     h1 { font-size: 1.25rem; margin-bottom: 0.5rem; }
+    .report-brand { display: flex; align-items: center; gap: 0.55rem; margin: 0 0 0.55rem; }
+    .report-brand img { width: 28px; height: 28px; border-radius: 6px; background: #000; }
+    .report-brand-name { font-size: 0.85rem; font-weight: 600; color: #334155; }
     .chart-wrap { margin-bottom: 1rem; overflow-x: auto; }
     .chart-wrap svg { width: 100%; height: auto; }
     table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
@@ -111,6 +116,10 @@ export function ReportTable({
   </style>
 </head>
 <body>
+  <div class="report-brand">
+    <img src="${SENSORIQUA_LOGO_DATA_URI}" alt="" width="28" height="28" />
+    <span class="report-brand-name">Sensoriqua</span>
+  </div>
   <h1>Sensor reading report</h1>
   <p class="meta">Exported ${new Date().toLocaleString()}</p>
   ${chartSection ? `<div class="chart-wrap">${chartSection}</div>` : ''}

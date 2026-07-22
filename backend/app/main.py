@@ -1,19 +1,33 @@
 """
 Sensoriqua backend: grouping → objects → sensors → configured sensors + dashboard.
-DSN: from JWT (Navixy App Connect), header X-Sensoriqua-DSN, or env SENSORIQUA_DSN.
+DSN: from JWT (Navixy App Connect) or env SENSORIQUA_DSN (standalone).
+Client X-Sensoriqua-DSN / ?user_id= only when ALLOW_CLIENT_DSN / ALLOW_CLIENT_USER_ID are set.
 Serves the frontend GUI from backend/static when that folder exists (e.g. after build).
 """
-import os
-import re
-import uuid
 from pathlib import Path
+
+# Load backend/.env before reading JWT_SECRET / CORS / other settings
+_env_path = Path(__file__).resolve().parent.parent / ".env"
+if _env_path.is_file():
+    try:
+        from dotenv import load_dotenv
+
+        load_dotenv(_env_path)
+    except ImportError:
+        pass
+
+import logging
+import os
+import time
+import uuid
+from collections import defaultdict
 from typing import Any
 from urllib.parse import urlparse
 
 import psycopg.errors
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -31,20 +45,42 @@ from .db import (
     app_state_uses_sqlite,
     app_state_table,
 )
+from .dsn_security import UnsafeDsnError, validate_dsn
+
+logger = logging.getLogger("sensoriqua")
 
 app = FastAPI(title="Sensoriqua", version="0.1.0")
+
+
+@app.exception_handler(UnsafeDsnError)
+async def unsafe_dsn_handler(_request: Request, exc: UnsafeDsnError):
+    return JSONResponse(status_code=400, content={"detail": str(exc)})
 
 # CORS: with credentials (Bearer tokens) do not use allow_origins=["*"].
 # Set CORS_ORIGINS to comma-separated origins (e.g. https://app.example.com,https://admin.example.com).
 _cors_origins_raw = os.environ.get("CORS_ORIGINS", "").strip()
 CORS_ORIGINS = [o.strip() for o in _cors_origins_raw.split(",") if o.strip()]
-if CORS_ORIGINS:
+if is_app_connect_enabled():
+    # Same-origin (static GUI) needs no CORS; cross-origin API callers must set CORS_ORIGINS.
+    if not CORS_ORIGINS:
+        logger.warning(
+            "JWT_SECRET is set but CORS_ORIGINS is empty: cross-origin browser API calls will be blocked. "
+            "Set CORS_ORIGINS to your frontend origin(s)."
+        )
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=CORS_ORIGINS or [],
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type", "X-Sensoriqua-DSN", "X-Sensoriqua-Login-Key"],
+    )
+elif CORS_ORIGINS:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=CORS_ORIGINS,
         allow_credentials=True,
         allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
-        allow_headers=["Authorization", "Content-Type", "X-Sensoriqua-DSN"],
+        allow_headers=["Authorization", "Content-Type", "X-Sensoriqua-DSN", "X-Sensoriqua-Login-Key"],
     )
 else:
     app.add_middleware(
@@ -189,52 +225,66 @@ class AuthLoginRequest(BaseModel):
 
 # ---------- Navixy App Connect: auth endpoint ----------
 
-_ALLOWED_DSN_SCHEMES = ("postgresql", "postgres")
-# Block private/internal hosts when validating login DSNs (SSRF mitigation).
-# Set ALLOW_PRIVATE_DSN=1 only in trusted environments (e.g. backend runs inside Navixy).
-_PRIVATE_HOST_PATTERN = re.compile(
-    r"^(localhost|127\.|10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|169\.254\.|::1)",
-    re.IGNORECASE,
-)
-ALLOW_PRIVATE_DSN = os.environ.get("ALLOW_PRIVATE_DSN", "").strip().lower() in ("1", "true", "yes")
+# Optional shared secret for login; rate limit per IP.
+LOGIN_API_KEY = os.environ.get("LOGIN_API_KEY", "").strip()
+LOGIN_RATE_LIMIT_PER_MINUTE = max(1, int(os.environ.get("LOGIN_RATE_LIMIT_PER_MINUTE", "30")))
+# Only trust X-Forwarded-For when behind a reverse proxy that sets it (otherwise spoofable).
+TRUST_PROXY = os.environ.get("TRUST_PROXY", "").strip().lower() in ("1", "true", "yes")
+_login_attempts: dict[str, list[float]] = defaultdict(list)
+
+
+def _client_ip(request: Request) -> str:
+    if TRUST_PROXY:
+        forwarded = request.headers.get("x-forwarded-for") or request.headers.get("X-Forwarded-For")
+        if forwarded:
+            return forwarded.split(",")[0].strip() or "unknown"
+    if request.client and request.client.host:
+        return request.client.host
+    return "unknown"
+
+
+def _check_login_rate_limit(request: Request) -> None:
+    ip = _client_ip(request)
+    now = time.time()
+    window = 60.0
+    attempts = _login_attempts[ip]
+    _login_attempts[ip] = [t for t in attempts if now - t < window]
+    if len(_login_attempts[ip]) >= LOGIN_RATE_LIMIT_PER_MINUTE:
+        raise HTTPException(status_code=429, detail="Too many login attempts; try again later")
+    _login_attempts[ip].append(now)
 
 
 def _validate_dsn_for_login(dsn: str, name: str) -> None:
-    """Ensure DSN is a Postgres URL and optionally block private hosts (SSRF)."""
-    if not dsn or not dsn.strip():
-        raise HTTPException(status_code=400, detail=f"{name} is required")
+    """Login-time DSN check; connect-time pin happens again in get_conn()."""
     try:
-        p = urlparse(dsn.strip())
-    except Exception:
-        raise HTTPException(status_code=400, detail=f"Invalid {name}")
-    scheme = (p.scheme or "").lower()
-    if scheme not in _ALLOWED_DSN_SCHEMES:
-        raise HTTPException(
-            status_code=400,
-            detail=f"{name} must be a PostgreSQL URL (postgresql:// or postgres://)",
-        )
-    if not ALLOW_PRIVATE_DSN:
-        host = (p.hostname or "").strip()
-        if host and _PRIVATE_HOST_PATTERN.match(host):
-            raise HTTPException(
-                status_code=400,
-                detail=f"{name} must not point to localhost or private network",
-            )
+        validate_dsn(dsn)
+    except UnsafeDsnError as e:
+        raise HTTPException(status_code=400, detail=f"{name}: {e}") from e
 
 
 @app.post("/api/auth/login")
-def auth_login(body: AuthLoginRequest):
+def auth_login(
+    body: AuthLoginRequest,
+    request: Request,
+    x_login_key: str | None = Header(None, alias="X-Sensoriqua-Login-Key"),
+):
     """
     Navixy App Connect: middleware calls this with user info and DB URLs.
     Returns JWT; store iotDbUrl/userDbUrl server-side for this user.
     Requires JWT_SECRET (min 32 chars) in env.
-    DSNs must be PostgreSQL and must not target localhost/private IPs (SSRF mitigation).
+    Optional LOGIN_API_KEY: when set, require matching X-Sensoriqua-Login-Key header.
+    Rate-limited per client IP. DSNs validated with DNS-aware private IP checks;
+    every later get_conn() re-validates and pins hostaddr (DNS rebinding mitigation).
     """
     if not is_app_connect_enabled():
         raise HTTPException(
             status_code=501,
             detail="Navixy App Connect not configured (set JWT_SECRET with at least 32 characters)",
         )
+    _check_login_rate_limit(request)
+    if LOGIN_API_KEY:
+        if not x_login_key or x_login_key != LOGIN_API_KEY:
+            raise HTTPException(status_code=401, detail="Invalid or missing login API key")
     if not body.email or not body.iotDbUrl or not body.userDbUrl:
         raise HTTPException(
             status_code=400,

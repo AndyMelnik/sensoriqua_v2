@@ -1,5 +1,7 @@
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { SENSORIQUA_LOGO_DATA_URI } from './brandAssets';
+import { sanitizeChartHtml } from './sanitizeHtml';
 import type { ReportTableColumn, ReportTableRow } from './ReportTable';
 
 export type ReportLegendItem = { label: string; color: string };
@@ -69,6 +71,7 @@ export function buildFullReportHtml(input: FullReportExportInput): string {
 
   const title = (input.title || DEFAULT_REPORT_TITLE).trim() || DEFAULT_REPORT_TITLE;
   const description = (input.description || '').trim();
+  const safeChart = sanitizeChartHtml(input.chartSvg);
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -79,6 +82,9 @@ export function buildFullReportHtml(input: FullReportExportInput): string {
     @page { size: A4 landscape; margin: 1.2cm; }
     html, body { margin: 0; padding: 0; }
     body { font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #fff; color: #0f172a; padding: 0.75rem 1rem; box-sizing: border-box; }
+    .report-brand { display: flex; align-items: center; gap: 0.55rem; margin: 0 0 0.55rem; }
+    .report-brand img { width: 28px; height: 28px; border-radius: 6px; background: #000; }
+    .report-brand-name { font-size: 0.85rem; font-weight: 600; color: #334155; letter-spacing: 0.02em; }
     h1 { font-size: 1.25rem; margin: 0 0 0.4rem; }
     h2 { font-size: 1.05rem; margin: 1.25rem 0 0.4rem; page-break-after: avoid; }
     .chart-wrap { margin-bottom: 0.5rem; overflow: visible; page-break-inside: avoid; }
@@ -95,11 +101,15 @@ export function buildFullReportHtml(input: FullReportExportInput): string {
   </style>
 </head>
 <body>
+  <div class="report-brand">
+    <img src="${SENSORIQUA_LOGO_DATA_URI}" alt="" width="28" height="28" />
+    <span class="report-brand-name">Sensoriqua</span>
+  </div>
   <h1>${escapeReportHtml(title)}</h1>
   ${description ? `<p class="report-description">${escapeReportHtml(description)}</p>` : ''}
   <p class="meta">Exported ${escapeReportHtml(exportedAt.toLocaleString())}</p>
   <h2>Graph</h2>
-  <div class="chart-wrap">${input.chartSvg}</div>
+  <div class="chart-wrap">${safeChart}</div>
   ${
     input.legendItems.length
       ? `<ul class="chart-legend">${input.legendItems
@@ -256,6 +266,18 @@ export async function downloadReportPdf(
   const title = (input.title || DEFAULT_REPORT_TITLE).trim() || DEFAULT_REPORT_TITLE;
   const description = (input.description || '').trim();
 
+  const logoSizeMm = 8;
+  try {
+    doc.addImage(SENSORIQUA_LOGO_DATA_URI, 'PNG', PDF_MARGIN_MM, y - 2, logoSizeMm, logoSizeMm);
+  } catch {
+    // Logo optional if raster fails
+  }
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(11);
+  doc.setTextColor(51, 65, 85);
+  doc.text('Sensoriqua', PDF_MARGIN_MM + logoSizeMm + 3, y + 3.5);
+  y += logoSizeMm + 4;
+
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(16);
   doc.setTextColor(15, 23, 42);
@@ -285,8 +307,9 @@ export async function downloadReportPdf(
     y = drawSectionTitle(doc, 'Graph', y);
 
     try {
-      const chartDataUrl = await svgToDataUrl(input.chartSvg);
-      const { width, height } = parseSvgSize(input.chartSvg);
+      const safeSvg = sanitizeChartHtml(input.chartSvg);
+      const chartDataUrl = await svgToDataUrl(safeSvg);
+      const { width, height } = parseSvgSize(safeSvg);
       let imgW = contentWidth;
       let imgH = (height / width) * imgW;
       if (imgH > PDF_CHART_MAX_HEIGHT_MM) {

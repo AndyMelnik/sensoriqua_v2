@@ -1,9 +1,12 @@
 /**
  * Sensoriqua API client.
  * Sends Authorization: Bearer <token> when auth_token is in localStorage (Navixy App Connect).
- * Sends X-Sensoriqua-DSN when dsn is set (standalone mode).
+ * X-Sensoriqua-DSN is sent only when VITE_ALLOW_CLIENT_DSN=1 (must also set ALLOW_CLIENT_DSN on backend).
  */
 const API_BASE = import.meta.env.VITE_API_URL || '';
+const ALLOW_CLIENT_DSN =
+  String(import.meta.env.VITE_ALLOW_CLIENT_DSN || '').toLowerCase() === '1' ||
+  String(import.meta.env.VITE_ALLOW_CLIENT_DSN || '').toLowerCase() === 'true';
 
 const AUTH_TOKEN_KEY = 'auth_token';
 
@@ -82,8 +85,10 @@ function headers(dsn?: string): HeadersInit {
   const h: Record<string, string> = { 'Content-Type': 'application/json' };
   const token = getAuthToken();
   if (token) h['Authorization'] = `Bearer ${token}`;
-  const d = dsn ?? getDsn();
-  if (d) h['X-Sensoriqua-DSN'] = d;
+  if (ALLOW_CLIENT_DSN) {
+    const d = dsn ?? getDsn();
+    if (d) h['X-Sensoriqua-DSN'] = d;
+  }
   return h;
 }
 
@@ -135,9 +140,8 @@ export async function getSensorsForObject(objectId: number, search?: string, inc
   return r.json();
 }
 
-export async function getConfiguredSensors(userId?: number) {
-  const q = userId != null ? `?user_id=${userId}` : '';
-  const r = await fetch(`${API_BASE}/api/configured-sensors${q}`, { headers: headers() });
+export async function getConfiguredSensors() {
+  const r = await fetch(`${API_BASE}/api/configured-sensors`, { headers: headers() });
   if (!r.ok) throw new Error(await r.text());
   return r.json();
 }
@@ -319,9 +323,8 @@ export async function getMapPositions(deviceIds: number[]): Promise<{
   return r.json();
 }
 
-export async function getDashboardPlanes(userId?: number) {
-  const q = userId != null ? `?user_id=${userId}` : '';
-  const r = await fetch(`${API_BASE}/api/dashboard-planes${q}`, { headers: headers() });
+export async function getDashboardPlanes() {
+  const r = await fetch(`${API_BASE}/api/dashboard-planes`, { headers: headers() });
   if (!r.ok) throw new Error(await r.text());
   return r.json();
 }

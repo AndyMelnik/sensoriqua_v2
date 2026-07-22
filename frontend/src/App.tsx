@@ -185,10 +185,27 @@ type ReportExportJson = {
   report: { config: ReportExportConfig; data?: ReportExportData };
 };
 
+function toFiniteNumber(v: unknown): number | null {
+  if (v == null || v === '') return null;
+  const n = typeof v === 'number' ? v : Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
 function scaleValue(v: number | null, mult: number | null | undefined): number | null {
   if (v == null) return null;
-  const m = mult ?? 1;
+  const m = toFiniteNumber(mult) ?? 1;
   return v * m;
+}
+
+/** Border/sparkline status vs thresholds (display units after multiplier). */
+function thresholdStatus(val: number | null, min: unknown, max: unknown): 'ok' | 'alarm' | 'neutral' {
+  const minN = toFiniteNumber(min);
+  const maxN = toFiniteNumber(max);
+  if (minN == null && maxN == null) return 'neutral';
+  if (val == null || !Number.isFinite(val)) return 'neutral';
+  if (minN != null && val < minN) return 'alarm';
+  if (maxN != null && val > maxN) return 'alarm';
+  return 'ok';
 }
 
 export default function App() {
@@ -514,6 +531,10 @@ export default function App() {
     let cancelled = false;
     setHistoryLoading(true);
     const controller = new AbortController();
+    const cfg = configured.find((c) =>
+      configuredIdsEqual(c.configured_sensor_id, historyPlane.configured_sensor_id)
+    );
+    const mult = toFiniteNumber(cfg?.multiplier ?? historyPlane.multiplier);
     api
       .getSensorHistory(
         {
@@ -527,7 +548,7 @@ export default function App() {
       .then((res) => {
         if (!cancelled) {
           const raw = res.series || [];
-          setHistoryData(raw.map((d) => ({ ...d, value: scaleValue(d.value, historyPlane.multiplier) })));
+          setHistoryData(raw.map((d) => ({ ...d, value: scaleValue(toFiniteNumber(d.value), mult) })));
         }
       })
       .catch(() => {
@@ -540,7 +561,7 @@ export default function App() {
       cancelled = true;
       controller.abort();
     };
-  }, [historyPlane, historyDurationHours]);
+  }, [historyPlane, historyDurationHours, configured]);
 
   const toggleGrouping = (type: GroupingType, id: number | string) => {
     setSelectedGroupingIds((prev) => ({
@@ -947,12 +968,6 @@ export default function App() {
   };
 
   const sparkKey = (deviceId: number, sensor: string, source: string = 'input') => `${deviceId}:${source}:${sensor}`;
-  const inThreshold = (val: number | null, min: number | null, max: number | null) => {
-    if (val == null) return true;
-    if (min != null && val < min) return false;
-    if (max != null && val > max) return false;
-    return true;
-  };
 
   const REPORT_COLORS = ['#0ea5e9', '#22c55e', '#eab308', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316'];
 
@@ -1628,13 +1643,26 @@ export default function App() {
     <div className={`app${dashboardExpanded ? ' app-dashboard-expanded' : ''}`}>
       <header className="top-bar">
         <div className="top-bar-brand">
-          <div className="top-bar-title">Sensoriqua 2 (Dashboard, Report, Map)</div>
-          <p className="top-bar-tagline">
-            Dashboard for monitoring sensors in real time · Reports from sensor readings · Map for live unit positions
-            {useLocalConfig && (
-              <span className="top-bar-local-hint" title="Configured sensors and dashboard are stored in this browser (localStorage)"> · Saved in this browser</span>
-            )}
-          </p>
+          <div className="top-bar-brand-row">
+            <span className="top-bar-logo-wrap" aria-hidden="true">
+              <img
+                className="top-bar-logo"
+                src="/sensoriqua-logo-header.png"
+                width={95}
+                height={95}
+                alt=""
+              />
+            </span>
+            <div className="top-bar-brand-text">
+              <div className="top-bar-title">Sensoriqua 2 (Dashboard, Report, Map)</div>
+              <p className="top-bar-tagline">
+                Dashboard for monitoring sensors in real time · Reports from sensor readings · Map for live unit positions
+                {useLocalConfig && (
+                  <span className="top-bar-local-hint" title="Configured sensors and dashboard are stored in this browser (localStorage)"> · Saved in this browser</span>
+                )}
+              </p>
+            </div>
+          </div>
           <nav className="app-tabs" aria-label="Main sections">
             <button
               type="button"
@@ -2095,18 +2123,27 @@ export default function App() {
               });
 
               const renderPlane = (p: DashboardPlane) => {
+                // Prefer live configured-sensor thresholds (local planes can be stale after edit).
+                const cfg = configured.find((c) =>
+                  configuredIdsEqual(c.configured_sensor_id, p.configured_sensor_id)
+                );
+                const minTh = toFiniteNumber(cfg?.min_threshold ?? p.min_threshold);
+                const maxTh = toFiniteNumber(cfg?.max_threshold ?? p.max_threshold);
+                const mult = toFiniteNumber(cfg?.multiplier ?? p.multiplier);
                 const key = sparkKey(p.device_id, p.sensor_input_label, p.sensor_source || 'input');
                 const latest = dashboardValues[key];
-                const rawVal = latest?.value ?? null;
-                const val = scaleValue(rawVal, p.multiplier);
-                const ok = inThreshold(val, p.min_threshold, p.max_threshold);
+                const rawVal = toFiniteNumber(latest?.value);
+                const val = scaleValue(rawVal, mult);
+                const status = thresholdStatus(val, minTh, maxTh);
+                const stroke =
+                  status === 'ok' ? '#22c55e' : status === 'alarm' ? '#ef4444' : '#0ea5e9';
                 const rawData = sparklineData[key] || [];
-                const data = rawData.map((d) => ({ ...d, value: scaleValue(d.value, p.multiplier) }));
+                const data = rawData.map((d) => ({ ...d, value: scaleValue(toFiniteNumber(d.value), mult) }));
                 return (
                   <div
                     key={p.dashboard_plane_id}
                     className="dashboard-plane"
-                    data-ok={ok}
+                    data-ok={status === 'neutral' ? undefined : status === 'ok'}
                     role="button"
                     tabIndex={0}
                     onClick={() => setHistoryPlane(p)}
@@ -2159,9 +2196,10 @@ export default function App() {
                         width={144}
                         chartHeight={34}
                         showThresholds
-                        min={p.min_threshold}
-                        max={p.max_threshold}
-                        stroke={ok ? '#22c55e' : '#ef4444'}
+                        min={minTh}
+                        max={maxTh}
+                        stroke={stroke}
+                        colorByThreshold={false}
                         showLastStat={false}
                       />
                     </div>
@@ -2584,7 +2622,13 @@ export default function App() {
 
       {activeTab === 'map' && <MapTab />}
 
-      {historyPlane && (
+      {historyPlane && (() => {
+        const cfg = configured.find((c) =>
+          configuredIdsEqual(c.configured_sensor_id, historyPlane.configured_sensor_id)
+        );
+        const minTh = toFiniteNumber(cfg?.min_threshold ?? historyPlane.min_threshold);
+        const maxTh = toFiniteNumber(cfg?.max_threshold ?? historyPlane.max_threshold);
+        return (
         <div className="modal-overlay" onClick={() => setHistoryPlane(null)}>
           <div className="modal history-modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header-row">
@@ -2614,8 +2658,8 @@ export default function App() {
                   width={580}
                   height={260}
                   showThresholds
-                  min={historyPlane.min_threshold}
-                  max={historyPlane.max_threshold}
+                  min={minTh}
+                  max={maxTh}
                   seriesLabel={historyPlane.sensor_label_custom}
                 />
               )}
@@ -2625,7 +2669,8 @@ export default function App() {
             </div>
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {configModal && (
         <ConfigModal

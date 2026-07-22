@@ -20,14 +20,16 @@ from typing import Any, Generator
 # Set inside get_app_state_conn so app_state_table() returns correct prefix
 _app_state_schema: ContextVar[str] = ContextVar("app_state_schema", default="postgres")
 
-import psycopg
-from psycopg.rows import dict_row
-
 # Load .env from backend directory so SENSORIQUA_DSN is set (file is gitignored)
 _env_path = Path(__file__).resolve().parent.parent / ".env"
 if _env_path.exists():
     from dotenv import load_dotenv
     load_dotenv(_env_path)
+
+import psycopg
+from psycopg.rows import dict_row
+
+from .dsn_security import UnsafeDsnError, prepare_safe_dsn
 
 # Default DSN: from env (e.g. .env) or placeholder
 DEFAULT_DSN = os.environ.get(
@@ -107,8 +109,15 @@ def _sqlite_path() -> Path | None:
 
 @contextmanager
 def get_conn(dsn: str) -> Generator[psycopg.Connection, None, None]:
-    """Context manager for a single Postgres connection. Caller closes via context."""
-    conn = psycopg.connect(dsn, row_factory=dict_row)
+    """
+    Context manager for a single Postgres connection.
+    Re-validates DSN and pins hostaddr on every connect (SSRF / DNS-rebinding mitigation).
+    """
+    try:
+        safe_dsn = prepare_safe_dsn(dsn)
+    except UnsafeDsnError:
+        raise
+    conn = psycopg.connect(safe_dsn, row_factory=dict_row)
     try:
         yield conn
     finally:

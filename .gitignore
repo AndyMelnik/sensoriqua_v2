@@ -1,4 +1,8 @@
 # Secrets — never commit
+.env
+*.env
+!.env.example
+!**/.env.example
 backend/.env
 
 # Python
@@ -7,10 +11,22 @@ __pycache__/
 .venv/
 venv/
 *.egg-info/
+.pytest_cache/
+backend/.pytest_cache/
 
-# Local app state
+# Local app state / credentials
 backend/sensoriqua_state.db
 backend/sensoriqua_state.db-*
+backend/sensoriqua_credentials.json
+backend/sensoriqua_credentials.tmp
+**/sensoriqua_credentials.json
+**/sensoriqua_credentials.tmp
+
+# Keys / certs
+*.pem
+*.key
+id_rsa
+id_rsa.pub
 
 # Node / frontend build
 frontend/node_modules/
@@ -20,3 +36,5 @@ frontend/dist/
 .DS_Store
 .idea/
 .vscode/
+*.swp
+*~

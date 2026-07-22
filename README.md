@@ -112,8 +112,8 @@ See **[docs/USER_GUIDE.md](docs/USER_GUIDE.md)** for step-by-step usage.
 
 ### Auth and data source
 
-- **Standalone:** Backend uses `SENSORIQUA_DSN` from `.env`. Optional `X-Sensoriqua-DSN` header for per-request override (e.g. testing).
-- **Navixy App Connect:** Set `JWT_SECRET` (min 32 chars). Middleware calls `POST /api/auth/login` with user and DB URLs; the app returns a JWT and uses **iotDbUrl** (telematics) and **userDbUrl** (app state) per user. All other `/api/*` routes require `Authorization: Bearer <token>`. See [docs/NAVIXY_APP_CONNECT.md](docs/NAVIXY_APP_CONNECT.md).
+- **Standalone:** Backend uses `SENSORIQUA_DSN` from `.env`. Client `X-Sensoriqua-DSN` / `?user_id=` are **disabled by default** (set `ALLOW_CLIENT_DSN` / `ALLOW_CLIENT_USER_ID` only for local debugging).
+- **Navixy App Connect:** Set `JWT_SECRET` (min 32 chars). Optionally set `LOGIN_API_KEY` and `CORS_ORIGINS`. Middleware calls `POST /api/auth/login`; the app returns a JWT and uses **iotDbUrl** / **userDbUrl** per user. All other `/api/*` routes require `Authorization: Bearer <token>`. See [docs/NAVIXY_APP_CONNECT.md](docs/NAVIXY_APP_CONNECT.md).
 
 ## Documentation
 
@@ -146,7 +146,7 @@ See **[docs/USER_GUIDE.md](docs/USER_GUIDE.md)** for step-by-step usage.
 ## Security
 
 - **Secrets:** Keep `backend/.env` out of version control. Do not commit DSN or credentials.
-- **Production:** With Navixy, use **CORS_ORIGINS** for your frontend origin(s). Do not rely on client-supplied DSN for untrusted users; with JWT_SECRET set, the app uses only credentials from the auth service per user.
+- **Production:** With Navixy, use **CORS_ORIGINS** and preferably **LOGIN_API_KEY**. Do not enable `ALLOW_CLIENT_DSN` / `ALLOW_CLIENT_USER_ID` on public deployments. With JWT_SECRET set, the app uses only credentials from the auth service per user.
 - For a full safety and security review (auth, CORS, SSRF, headers, SQL), see [SECURITY.md](SECURITY.md).
 
 ## Contributing

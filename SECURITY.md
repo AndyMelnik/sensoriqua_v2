@@ -7,19 +7,27 @@ This document summarizes security measures and a pre-publish checklist for deplo
 - **JWT:** When `JWT_SECRET` is set (Navixy App Connect), all `/api/*` routes except `POST /api/auth/login` require a valid `Authorization: Bearer <token>`.
 - **Algorithm:** Tokens are signed with HS256; the backend decodes only with `algorithms=[JWT_ALGORITHM]` (no `alg=none` or algorithm confusion).
 - **Secrets:** `JWT_SECRET` must be at least 32 characters. Generate with e.g. `openssl rand -hex 32`. Never commit `.env` or real secrets.
-- **Per-user data:** DSN (iotDbUrl/userDbUrl) is stored server-side keyed by user; each request uses only the DSN for the token’s user. No cross-user or cross-session use of credentials.
+- **Per-user data:** DSN (iotDbUrl/userDbUrl) is stored server-side keyed by user (in memory + `sensoriqua_credentials.json` by default); each request uses only the DSN for the token’s user.
+- **Login hardening:** Optional `LOGIN_API_KEY` (header `X-Sensoriqua-Login-Key`); per-IP rate limit (`LOGIN_RATE_LIMIT_PER_MINUTE`, default 30). Rate-limit IP uses `X-Forwarded-For` only when `TRUST_PROXY=1`.
+
+## Standalone mode (no JWT)
+
+- Uses `SENSORIQUA_DSN` and `SENSORIQUA_USER_ID` from the environment only.
+- **`X-Sensoriqua-DSN` and `?user_id=` are ignored by default** (prevents IDOR and client-chosen databases).
+- Enable only for local debugging: `ALLOW_CLIENT_DSN=1` and/or `ALLOW_CLIENT_USER_ID=1`, plus frontend `VITE_ALLOW_CLIENT_DSN=1` if the UI should send a DSN header. Never enable on a public deployment.
 
 ## Login endpoint and SSRF
 
 - **POST /api/auth/login** accepts `iotDbUrl` and `userDbUrl` (from Navixy middleware). The server connects to these URLs.
-- **Validation:** Only `postgresql://` or `postgres://` URLs are accepted. By default, DSNs that point to localhost or private IP ranges are rejected to reduce SSRF risk.
-- **Trusted environments:** If the backend runs in a trusted environment (e.g. inside Navixy) and must accept internal DB URLs, set `ALLOW_PRIVATE_DSN=1`. Do not set this on a public-facing deployment.
+- **Validation:** Only `postgresql://` or `postgres://` URLs are accepted. Hostname is resolved (`getaddrinfo`); private, loopback, link-local, and reserved addresses are rejected unless `ALLOW_PRIVATE_DSN=1`.
+- **Connect-time pin:** Every `get_conn()` re-validates the DSN and sets libpq `hostaddr` to a resolved IP that passed the check, so DNS cannot rebind to a private address between login and connect.
+- **Trusted env DSN:** `SENSORIQUA_DSN` from the environment is treated as operator-trusted (private/localhost allowed) but is still pinned via `hostaddr`.
+- **Trusted environments:** If the backend runs in a trusted environment (e.g. inside Navixy) and must accept internal DB URLs from login, set `ALLOW_PRIVATE_DSN=1`. Do not set this on a public-facing deployment.
 
 ## CORS
 
-- With **credentials** (Bearer tokens), the app does not use `allow_origins=["*"]` (browser security requirement).
-- Set **CORS_ORIGINS** to a comma-separated list of allowed frontend origins (e.g. `https://app.example.com,https://admin.example.com`). When set, only those origins can send credentialed requests.
-- If CORS_ORIGINS is not set, CORS uses `allow_origins=["*"]` with `allow_credentials=False`.
+- When **JWT is enabled**, empty `CORS_ORIGINS` blocks cross-origin browser API access (same-origin static GUI still works). Set `CORS_ORIGINS` for a separate frontend origin.
+- When JWT is off and `CORS_ORIGINS` is empty, CORS uses `allow_origins=["*"]` and `allow_credentials=False`.
 
 ## Security headers
 
@@ -32,13 +40,18 @@ The backend adds:
 ## SQL and input validation
 
 - **Parameterized queries:** User-controlled input is passed as parameters (`%s` / `%(name)s`), not interpolated into SQL strings. Schema/table names used in queries are fixed in code (`raw_business_data`, `raw_telematics_data`, `app_sensoriqua.*`).
-- **Grouping type:** The `type` query parameter for `/api/groupings` is restricted to a fixed set (`groups`, `tags`, `departments`, `garages`, `sensor_types`).
+- **Grouping type:** The `type` query parameter for `/api/groupings` is restricted to a fixed set.
 - **Tracking columns:** For telematics, only whitelisted column names from `TRACKING_DATA_CORE_SIGNALS` are used in dynamic column references.
+
+## HTML / PDF export
+
+- Report title, description, and table cells are HTML-escaped.
+- Chart SVG embedded in HTML exports is sanitized (scripts, event handlers, and dangerous tags stripped) before write.
 
 ## Secrets and .env
 
-- **Never commit:** `.env`, `backend/.env`, and `*.env` (except `*.env.example`) are in `.gitignore`. Do not remove them or commit files that contain real DSNs or `JWT_SECRET`.
-- **Placeholders:** Default DSN in code is a placeholder; production must set `SENSORIQUA_DSN` (and optionally `JWT_SECRET`, `CORS_ORIGINS`) via environment.
+- **Never commit:** `.env`, `*.env` (except `*.env.example`), `sensoriqua_credentials.json`, `*.pem` / private keys — listed in `.gitignore`.
+- **Placeholders:** Default DSN in code is a placeholder; production must set `SENSORIQUA_DSN` (and optionally `JWT_SECRET`, `CORS_ORIGINS`, `LOGIN_API_KEY`) via environment.
 
 ## Dependencies
 
@@ -47,27 +60,28 @@ The backend adds:
 
 ## Pre-publish checklist (public repo)
 
-1. **No secrets in repo:** Confirm no `.env` or real credentials are committed; `.gitignore` includes `.env`, `backend/.env`, `*.env`, `!*.env.example`.
-2. **CORS:** Set `CORS_ORIGINS` in production to your frontend origin(s). Do not use `allow_origins=["*"]` with credentials in production.
-3. **JWT_SECRET:** In production with Navixy, set a strong `JWT_SECRET` (min 32 chars) in the environment, not in code.
-4. **SSRF:** Leave `ALLOW_PRIVATE_DSN` unset (or `0`) on any deployment that accepts login from the public internet.
-5. **Rate limiting:** The login endpoint has no built-in rate limit. Consider putting the API behind a reverse proxy or gateway that rate-limits (e.g. by IP) for login and sensitive routes.
-6. **HTTPS:** Serve the API and frontend over HTTPS in production.
+1. **No secrets in repo:** Confirm no `.env` or real credentials are committed.
+2. **CORS:** With Navixy/JWT, set `CORS_ORIGINS` to your frontend origin(s).
+3. **JWT_SECRET** and **LOGIN_API_KEY** for any internet-reachable App Connect deployment (treat the login key as required on the public internet).
+4. **SSRF:** Leave `ALLOW_PRIVATE_DSN` unset on public internet-facing login. Connect-time `hostaddr` pinning is always applied.
+5. **Standalone locks:** Leave `ALLOW_CLIENT_DSN` and `ALLOW_CLIENT_USER_ID` unset in production.
+6. **Proxy:** Set `TRUST_PROXY=1` only behind a reverse proxy that overwrites `X-Forwarded-For`; otherwise leave unset so login rate limits use the real TCP peer.
+7. **HTTPS:** Serve the API and frontend over HTTPS in production.
 
 ## Client-side storage (localStorage)
 
-- **Auth token:** When using Navixy, the frontend stores the JWT in `localStorage.auth_token` and sends it in the `Authorization` header. This is standard for SPAs; ensure the app is only served over HTTPS and consider short token expiry.
-- **Config fallback:** When the backend returns 503 for app state (configured sensors / dashboard), the frontend can store that data in `localStorage` (keys `sensoriqua_configured`, `sensoriqua_dashboard`). This is per-browser data only and is not sent to the server except as part of normal API calls (e.g. sparklines use the list to request time series). No secrets should be stored in these keys.
+- **Auth token:** When using Navixy, the frontend stores the JWT in `localStorage.auth_token` and sends it in the `Authorization` header. Serve over HTTPS; consider short token expiry.
+- **Config fallback:** On 503 for app state, configured sensors / dashboard may be stored in localStorage. No secrets should be stored in those keys.
 
 ## Pentest / security checklist (summary)
 
-- **Auth:** JWT with fixed algorithm (HS256); no `alg=none`; 401 when App Connect is on and token missing/invalid.
-- **Login:** DSN restricted to postgresql/postgres; private IPs rejected unless `ALLOW_PRIVATE_DSN=1`.
-- **SQL:** All user input is parameterized; schema/table names are fixed in code; tracking columns whitelisted.
-- **CORS:** Credentialed requests require explicit `CORS_ORIGINS` (no `*` with credentials).
-- **Headers:** `X-Content-Type-Options: nosniff`; framing configurable; `Referrer-Policy` set.
-- **Secrets:** No `.env` or real DSN/JWT_SECRET in repo; credentials stored server-side per user.
-- **Rate limiting:** Not implemented; use a reverse proxy or gateway for login and sensitive routes in production.
+- **Auth:** JWT HS256; 401 when App Connect is on and token missing/invalid.
+- **Login:** Postgres URL only; DNS-aware private IP block; rate limit; optional login API key; connect-time hostaddr pin against DNS rebinding.
+- **Standalone:** No client `user_id` / DSN unless opt-in env flags.
+- **SQL:** Parameterized; fixed identifiers; tracking columns whitelisted.
+- **CORS:** Explicit origins when JWT enabled.
+- **Exports:** Escaped text + sanitized chart HTML.
+- **Secrets:** No `.env` or credential files in repo.
 
 ## Reporting vulnerabilities
 

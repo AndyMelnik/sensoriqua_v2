@@ -2,6 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 type Point = { ts: string; value: number | null };
 
+function toFiniteNumber(v: unknown): number | null {
+  if (v == null || v === '') return null;
+  const n = typeof v === 'number' ? v : Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
 function formatCompact(n: number): string {
   const abs = Math.abs(n);
   if (abs >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
@@ -33,6 +39,7 @@ export function Sparkline({
   showLastStat = true,
   interactive = true,
   fillContainer = false,
+  colorByThreshold = true,
 }: {
   data: Point[];
   width?: number;
@@ -50,6 +57,11 @@ export function Sparkline({
   interactive?: boolean;
   /** Size chart to parent width (e.g. dashboard plane-spark at 15%) */
   fillContainer?: boolean;
+  /**
+   * When true (default) and thresholds are shown, stroke the line green/red from the last point.
+   * Set false to keep `stroke` (e.g. dashboard widget colored from latest-values).
+   */
+  colorByThreshold?: boolean;
 }) {
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -80,11 +92,13 @@ export function Sparkline({
     if (series.length === 0) return null;
 
     const values = series.map((d) => d.value);
-    const hasTh = showThresholds && (min != null || max != null);
+    const minN = toFiniteNumber(min);
+    const maxN = toFiniteNumber(max);
+    const hasTh = Boolean(showThresholds && (minN != null || maxN != null));
     const dataMin = Math.min(...values);
     const dataMax = Math.max(...values);
-    const plotMin = Math.min(dataMin, min ?? dataMin, max ?? dataMin);
-    const plotMax = Math.max(dataMax, min ?? dataMax, max ?? dataMax);
+    const plotMin = Math.min(dataMin, minN ?? dataMin, maxN ?? dataMin);
+    const plotMax = Math.max(dataMax, minN ?? dataMax, maxN ?? dataMax);
     const range = plotMax - plotMin || 1;
 
     const padX = 2;
@@ -99,13 +113,13 @@ export function Sparkline({
 
     const last = points[points.length - 1];
     const inRange = (v: number) => {
-      if (min != null && v < min) return false;
-      if (max != null && v > max) return false;
+      if (minN != null && v < minN) return false;
+      if (maxN != null && v > maxN) return false;
       return true;
     };
 
     const lineColor =
-      hasTh && (min != null || max != null)
+      hasTh && colorByThreshold
         ? inRange(last.value)
           ? '#22c55e'
           : '#ef4444'
@@ -113,8 +127,8 @@ export function Sparkline({
 
     const polyPoints = points.map((p) => `${p.x},${p.y}`).join(' ');
 
-    const thMinY = min != null ? yAt(min) : null;
-    const thMaxY = max != null ? yAt(max) : null;
+    const thMinY = minN != null ? yAt(minN) : null;
+    const thMaxY = maxN != null ? yAt(maxN) : null;
     const bandTop = min != null && max != null ? Math.min(thMinY!, thMaxY!) : null;
     const bandBot = min != null && max != null ? Math.max(thMinY!, thMaxY!) : null;
 
@@ -141,7 +155,7 @@ export function Sparkline({
       timeEnd,
       inRange,
     };
-  }, [series, data, chartWidth, chartHeight, showThresholds, min, max, stroke]);
+  }, [series, data, chartWidth, chartHeight, showThresholds, min, max, stroke, colorByThreshold]);
 
   const pickIndexFromEvent = useCallback(
     (clientX: number, svg: SVGSVGElement) => {

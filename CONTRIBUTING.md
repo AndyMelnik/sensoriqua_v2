@@ -18,7 +18,7 @@ Thank you for your interest in contributing.
 2. Follow the [Quick start](README.md#quick-start-local-testing) in the main README to set up the database, backend, and frontend.
 3. Use `backend/.env.example` to create `backend/.env` with your DSN. **Do not commit `.env` or any real credentials.**
 
-**Optional — strip co-author lines from commit messages:** To remove automatically added co-author lines from commit messages, install:  
+**Optional — strip tooling trailers from commit messages:** To remove automatically added `Co-authored-by` / `Made-with` lines from commit messages, install:  
 `cp scripts/prepare-commit-msg .git/hooks/prepare-commit-msg && chmod +x .git/hooks/prepare-commit-msg`
 
 ## Code and pull requests

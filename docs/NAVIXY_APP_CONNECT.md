@@ -23,9 +23,16 @@ Sensoriqua can be used with **Navixy App Connect**, an authentication gateway th
    JWT_SECRET=<your-generated-secret>
    ```
 
-2. **Auth endpoint**: Sensoriqua implements **POST /api/auth/login** as required by the [Navixy App Connect contract](https://docs.navixy.com/). The endpoint is only active when `JWT_SECRET` is set (at least 32 characters).
+2. **Auth endpoint**: Sensoriqua implements **POST /api/auth/login** as required by the [Navixy App Connect contract](https://docs.navixy.com/). The endpoint is only active when `JWT_SECRET` is set (at least 32 characters). Optional hardening:
+   - `LOGIN_API_KEY` — require header `X-Sensoriqua-Login-Key` (set the same value in the middleware if it supports custom headers).
+   - Per-IP rate limiting (`LOGIN_RATE_LIMIT_PER_MINUTE`, default 30). Uses `X-Forwarded-For` only when `TRUST_PROXY=1`.
+   - Login DSNs are validated with DNS resolution; private IPs are rejected unless `ALLOW_PRIVATE_DSN=1`. Every DB connect re-validates and pins `hostaddr` (DNS rebinding mitigation).
 
-3. **API behavior**: All `/api/*` routes accept an optional `Authorization: Bearer <token>` header. When present and valid, the request uses the DSN and user identity from the token. Otherwise, the app falls back to `X-Sensoriqua-DSN` and query `user_id` (standalone mode).
+3. **API behavior**: When `JWT_SECRET` is set (App Connect enabled), every `/api/*` route **except** `POST /api/auth/login` **requires** a valid `Authorization: Bearer <token>` header. The DSN and user identity come only from that token (server-stored `iotDbUrl` / `userDbUrl`). There is **no** fallback to `X-Sensoriqua-DSN` or query `user_id` in this mode. Standalone mode (no JWT / short secret) uses env `SENSORIQUA_DSN` only; client DSN/`user_id` overrides require explicit `ALLOW_CLIENT_DSN` / `ALLOW_CLIENT_USER_ID` and must not be used on the public internet.
+
+4. **CORS**: Set `CORS_ORIGINS` to your frontend origin(s) when the UI is served from a different host than the API. With JWT enabled and empty `CORS_ORIGINS`, cross-origin browser calls are blocked (same-origin static GUI is fine).
+
+5. **Credential persistence**: App Connect DSNs are kept in memory and written to `sensoriqua_credentials.json` (gitignored) so tokens survive process restarts.
 
 ## Frontend
 
