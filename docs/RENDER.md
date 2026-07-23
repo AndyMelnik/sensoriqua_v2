@@ -37,14 +37,15 @@ One Render Web Service runs both the FastAPI backend and the React frontend. The
    - **Build Command:**
      ```bash
      cd frontend && npm ci && npm run build
-     mkdir -p ../backend/static && cp -r dist/* ../backend/static/
+     rm -rf ../backend/static
+     mkdir -p ../backend/static && cp -a dist/. ../backend/static/
      cd ../backend && pip install -r requirements.txt
      ```
    - **Start Command:**
      ```bash
      cd backend && uvicorn app.main:app --host 0.0.0.0 --port $PORT
      ```
-4. Click **Advanced** and add **Environment Variables** (see below). Add **PYTHON_VERSION** = `3.11` if needed.
+4. Click **Advanced** and add **Environment Variables** (see below). Add **PYTHON_VERSION** = `3.11` and **NODE_VERSION** = `20.18.0` (needed so `npm` works on a Python service).
 5. Click **Create Web Service**. Render builds and deploys; the app will be at `https://<name>.onrender.com`.
 
 ---
@@ -61,6 +62,7 @@ Add these in the Render Dashboard under your service → **Environment**.
 | **CORS_ORIGINS** | Recommended | Comma-separated frontend origins, e.g. `https://sensoriqua.onrender.com`. Required when using credentials (Navixy). Do not use `*` with credentials. |
 | **ALLOW_FRAME_ORIGINS** | No | Iframe embedding. `deny` = no embedding; or comma-separated origins, e.g. `https://app.navixy.com`. Empty = allow all. |
 | **PYTHON_VERSION** | No | Set to `3.11` (or 3.10+) if needed. The blueprint sets 3.11. |
+| **NODE_VERSION** | Recommended | e.g. `20.18.0`. Required on a Python Web Service so the build can run `npm ci` / `npm run build`. Without it, deploy may keep the old committed `backend/static` UI. |
 
 **Navixy App Connect:** Set **JWT_SECRET** and **CORS_ORIGINS** (your Render URL). Do **not** set SENSORIQUA_DSN for production users; the DSN comes from Navixy per user (iotDbUrl / userDbUrl).
 
@@ -125,9 +127,10 @@ The app allows iframe embedding by default. To restrict or disable:
 
 | Issue | What to check |
 |-------|----------------|
-| Build fails at `npm ci` | Ensure `frontend/package-lock.json` exists and is committed. |
-| Build fails at `cp dist/*` | Build command must include `mkdir -p ../backend/static` before `cp`. |
-| Test build locally | From repo root run `./scripts/build-for-render.sh` (builds frontend and copies to `backend/static/`). |
+| **Old UI after deploy** | 1) Build logs must show `vite build` / `npm run build`. 2) Set **NODE_VERSION**=`20.18.0`. 3) Build command must **`rm -rf backend/static`** before copy. 4) Confirm Root Directory is empty (repo root). 5) Hard-refresh the browser (cache). |
+| Build fails at `npm ci` / `npm: not found` | Add env **NODE_VERSION**=`20.18.0` on the Python Web Service. Ensure `frontend/package-lock.json` is committed. |
+| Build fails at `cp dist` | Build command must `rm -rf` then `mkdir -p ../backend/static` before `cp -a dist/. ../backend/static/`. |
+| Test build locally | From repo root run `./scripts/build-for-render.sh` (builds frontend and replaces `backend/static/`). |
 | 401 Unauthorized on /api/* | With Navixy, JWT_SECRET must be set and users must open the app via Navixy so the middleware calls `/api/auth/login` and the client gets a token. |
 | CORS errors | Set **CORS_ORIGINS** to your frontend origin (e.g. the Render URL). No trailing slash. |
 | App state lost on restart | Using default SQLite on Render; add a Persistent Disk or use Postgres for SENSORIQUA_APP_STATE_DSN. |
@@ -140,9 +143,10 @@ The app allows iframe embedding by default. To restrict or disable:
 | Item | Value |
 |------|--------|
 | **Root Directory** | (empty) |
-| **Build Command** | `cd frontend && npm ci && npm run build` then `mkdir -p ../backend/static && cp -r dist/* ../backend/static/` then `cd ../backend && pip install -r requirements.txt` |
+| **Build Command** | `cd frontend && npm ci && npm run build` → `rm -rf ../backend/static && mkdir -p ../backend/static && cp -a dist/. ../backend/static/` → `cd ../backend && pip install -r requirements.txt` |
 | **Start Command** | `cd backend && uvicorn app.main:app --host 0.0.0.0 --port $PORT` |
-| **GUI** | Served at `/` from `backend/static/` |
+| **GUI** | Served at `/` from `backend/static/` (rebuilt every deploy) |
 | **API** | `/api/*`, `/docs` |
+| **Env** | `PYTHON_VERSION=3.11`, `NODE_VERSION=20.18.0`, plus JWT/DSN as needed |
 | **Required env (Navixy)** | JWT_SECRET, CORS_ORIGINS |
 | **Required env (standalone)** | SENSORIQUA_DSN |

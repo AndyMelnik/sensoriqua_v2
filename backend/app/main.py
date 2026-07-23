@@ -1831,15 +1831,31 @@ if _SERVE_GUI:
     if _assets_dir.exists():
         app.mount("/assets", StaticFiles(directory=str(_assets_dir)), name="assets")
 
+    def _index_response() -> FileResponse:
+        # Avoid sticky old SPA shells after redeploy (hashed assets change each build).
+        return FileResponse(
+            str(_STATIC_DIR / "index.html"),
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+        )
+
     @app.get("/")
     def _serve_index():
-        return FileResponse(str(_STATIC_DIR / "index.html"))
+        return _index_response()
 
     @app.get("/{full_path:path}")
     def _serve_spa(full_path: str):
         if full_path in ("docs", "redoc", "openapi.json") or full_path.startswith(("api/", "docs/", "redoc/")):
             raise HTTPException(status_code=404, detail="Not Found")
-        return FileResponse(str(_STATIC_DIR / "index.html"))
+        # Serve real files from static root (favicon, logos, etc.); do not SPA-fallback over them.
+        static_root = _STATIC_DIR.resolve()
+        candidate = (static_root / full_path).resolve()
+        try:
+            candidate.relative_to(static_root)
+        except ValueError:
+            raise HTTPException(status_code=404, detail="Not Found") from None
+        if candidate.is_file():
+            return FileResponse(str(candidate))
+        return _index_response()
 else:
     @app.get("/")
     def root():
