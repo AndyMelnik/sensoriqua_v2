@@ -1,6 +1,14 @@
-# Sensoriqua 2 (Dashboards and Reports)
+# Sensoriqua 2 — Dashboards, Reports & Map
 
-Web UI for **dashboards** (configure and monitor telematics/IoT sensors), **reports** (sensor reading graphs and tables over a chosen timeframe), and a **live map** (fleet positions with optional telemetry filters). Filter objects by **Groups**, **Tags**, or **Sensor type** → select objects → pick sensors → configure labels, thresholds, and mini-chart period. View configured sensors with interactive sparklines, add them to a **dashboard** (with optional **grouping** and labels), and open **history charts**. In **Reports**, set a date range and generate a multi-series **graph** plus **raw** and **summary** tables; export/import JSON, HTML, or PDF, and export tables to XLSX. Supports **Navixy App Connect** (per-user auth and DB credentials) and **export/import** of dashboard layout (including groups).
+Sensoriqua 2 is a web app for telematics and IoT monitoring. It combines three workspaces:
+
+| Tab | What it does |
+|-----|----------------|
+| **Dashboards** | Configure sensors, watch live values and sparklines, build a threshold-colored panel board |
+| **Reports** | Pick objects/sensors and a timeframe; generate charts plus raw/summary tables; export JSON, HTML, PDF, XLSX |
+| **Map** | Filter fleet units by business entity and telemetry conditions; show live GPS on OpenStreetMap |
+
+Data comes from PostgreSQL telematics schemas (`raw_business_data`, `raw_telematics_data`). Auth can run **standalone** (env DSN) or via **Navixy App Connect** (per-user JWT and DB URLs).
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -8,7 +16,7 @@ Web UI for **dashboards** (configure and monitor telematics/IoT sensors), **repo
 
 - **Python 3.10+** (backend)
 - **Node.js 18+** and npm (frontend)
-- **PostgreSQL** with schemas `raw_business_data` and `raw_telematics_data` (or compatible schema/table layout; see [Schema](#schema))
+- **PostgreSQL** with schemas `raw_business_data` and `raw_telematics_data` (or compatible layout; see [Schema](#schema))
 
 ## Quick start (local)
 
@@ -50,65 +58,76 @@ Web UI for **dashboards** (configure and monitor telematics/IoT sensors), **repo
 
 ## Deploy on Render.com
 
-Sensoriqua 2 runs on [Render](https://render.com) as a **single Web Service** (API + GUI at one URL). Full instructions: **[docs/RENDER.md](docs/RENDER.md)**.
+Sensoriqua 2 runs on [Render](https://render.com) as a **single Web Service** (API + GUI at one URL). Full instructions: **[docs/RENDER.md](docs/RENDER.md)** · quick checklist: **[docs/RENDER_DEPLOY_CHECKLIST.md](docs/RENDER_DEPLOY_CHECKLIST.md)**.
 
 **Quick steps:**
 
 1. Push the repo to GitHub and connect it to Render (**New → Blueprint** and select the repo, or **New → Web Service** and set Build/Start manually).
-2. Use the **Build** and **Start** commands from [docs/RENDER.md](docs/RENDER.md#1-one-web-service-api--gui). The blueprint in `render.yaml` is preconfigured.
+2. Use the **Build** and **Start** commands from [docs/RENDER.md](docs/RENDER.md#1-one-web-service-api--gui). The blueprint in `render.yaml` is preconfigured (`NODE_VERSION` required for the frontend build).
 3. In Render → **Environment**, set at least:
    - **Navixy:** `JWT_SECRET` (Secret, min 32 chars), `CORS_ORIGINS` (your Render URL, e.g. `https://sensoriqua.onrender.com`).
    - **Standalone:** `SENSORIQUA_DSN` (PostgreSQL connection string).
-4. Deploy. Open `https://<your-service>.onrender.com` for the GUI; API at `/api/*`, docs at `/docs`.
+4. Deploy with **Clear build cache** when updating the UI. Open `https://<your-service>.onrender.com` for the GUI; API at `/api/*`, docs at `/docs`.
 
-To test the same build locally: run `./scripts/build-for-render.sh` from the repo root (builds frontend and copies to `backend/static/`).
+To test the same build locally: run `./scripts/build-for-render.sh` from the repo root (builds frontend and replaces `backend/static/`).
 
 **Embedding in an iframe:** Allowed by default. Set **ALLOW_FRAME_ORIGINS** to restrict or `deny` to disable (see [docs/RENDER.md](docs/RENDER.md#6-embedding-in-an-iframe)).
 
 ## Features
 
-The app has three main tabs: **Dashboards**, **Reports**, and **Map**.
+### Dashboards
 
-### Dashboards tab — Left panel (Steps 1–3)
+Build a live monitoring board from telematics sensors (inputs, states, and tracking fields).
 
-- **Step 1 – Filter by grouping:** Choose **Group**, **Tag**, or **Sensor type**. Multi-select items; objects matching any selection appear in Step 2. Leave all empty to see all objects. Search within each grouping.
-- **Step 2 – Objects:** List shows objects (with optional group/tag/department labels). Toggle view: flat list, by group, or by tag. Search by object label; select one or more objects.
-- **Step 3 – Sensors:** For each selected object, pick one or more sensors (Input, State, or Tracking). **Configure / Add** (or **Configure / Edit** if already configured): **display label**, **MIN/MAX**, **multiplier**, **mini-chart period** (1 / 2 / 4 / 8 hours) → save to configured list.
+**Select and configure**
 
-### Dashboards tab — Configured sensors and dashboard
+1. **Filter** objects by **Groups**, **Tags**, or **Sensor type** (multi-select; empty = all objects).
+2. **Choose objects** — flat list or grouped by group/tag; search by label.
+3. **Pick sensors** per object, then **Configure / Add** (or **Configure / Edit**):
+   - Custom **display label**
+   - Optional **MIN / MAX** thresholds (drive green/red panel coloring)
+   - **Multiplier** to scale displayed values
+   - **Mini-chart period** — last **1 / 2 / 4 / 8 hours** for sparklines
 
-- List of configured sensors with object label, custom label, and an **interactive sparkline** (192px wide; hover for value/time; min/max stats). Mini-chart window follows **sparkline_hours** per sensor (default 1 hour).
-- **Edit** (card action or **Configure / Edit** in Step 3) — update label, thresholds, multiplier, or mini-chart period; changes are saved via **PATCH** and reflected immediately on the card and dashboard.
-- **Add to dashboard** — add the sensor to the right-hand dashboard.
-- **Remove** — remove from configured list (soft delete).
-- If the backend returns an error when saving (e.g. app state DB unavailable), the app **switches to browser storage** for that session: configured list and dashboard are kept in **localStorage** (tagline shows “Saved in this browser”). Sparklines and latest values still use the API with the current list.
+**Configured list (center)**
 
-### Dashboard (right)
+- Cards with interactive sparklines (hover for time/value; min/max stats).
+- **Edit**, **Add to dashboard**, **Remove**.
+- If app-state DB is unavailable, the UI falls back to **browser localStorage** (“Saved in this browser”) while live values still come from the API.
 
-- Panels for each added sensor: **object label**, **sensor label**, **latest value**, **timestamp**, and a **144px** interactive sparkline (min/max under the chart; latest value in the panel header). Values are **green** when within MIN/MAX, **red** when outside.
-- **Expand** — make the dashboard fill the entire browser window (hides header and side panels). **Collapse** — return to normal layout.
-- **Update interval:** 30 sec, 1 min, or 5 min (configurable).
-- **Click a panel** to open an interactive **history chart** (1, 4, 12, or 24 hours): crosshair, value/time tooltip, MIN/MAX legend.
-- **Remove** a panel from the dashboard (sensor stays in configured list).
-- **Export** — download the current dashboard layout as JSON (plane IDs and order).
-- **Import** — load a dashboard from a previously exported JSON file (replaces current dashboard panels with the same configured_sensor_ids where applicable). Dashboard **grouping:** use **+** on a panel to assign a group label (panels in the same group appear in a framed section); **−** removes the panel from its group. Export/import JSON includes groups.
+**Live dashboard (right)**
 
-### Reports tab
+- Panels show object/sensor labels, **latest value**, and a **144px** sparkline.
+- Border/sparkline color: **green** inside thresholds, **red** outside, **neutral** when no thresholds or no reading.
+- **Expand / Collapse** full-window mode; refresh every **30s / 1m / 5m**.
+- **Click a panel** → interactive **history chart** (1–24h) with crosshair, tooltip, and threshold legend.
+- **Group panels** with **+ / −** (named sections); grouping is kept in export JSON.
+- **Export / Import** dashboard layout as JSON (planes + groups).
 
-- **Steps 1–3** same as Dashboards; set a **multiplier** per sensor for report values. **Step 4 – Timeframe:** choose From and To date/time.
-- **Report name** and **Description** — single-line fields in a card above the report (included in JSON, HTML, and PDF export).
-- **Generate report:** multi-series **graph** (drag-to-zoom, Reset, legend toggles), **Raw data** table (by timestamp), **Summary** table (by date: Min, Max, Avg).
-- **Header actions:** **Import**, **Export JSON**, **Export HTML**, **Export PDF** (full report; PDF built client-side with jsPDF). Per-table **Export XLSX** uses ExcelJS (write-only). Tables support sort, search, and pagination (20/50/100 rows). Data can be **raw** (unresampled) or 1-minute buckets.
+### Reports
 
-### Map tab
+Generate analytical views over a chosen time range for the same objects and sensors.
 
-- **Step 1 – Business entity:** Filter starting point — **Objects**, **Vehicles**, **Employees**, **Departments**, **Groups**, **Tags**, **Sensor types**, or **Sensor names** (from telematics/business schema).
-- **Step 2 – Select values:** Multi-select entities (empty = all objects for that dimension). Search, Clear, Select all, Refresh.
-- **Step 3 – Conditions (optional):** Filter units by latest **input** or **state** telemetry (`>`, `<`, `=`, `between`); all conditions must pass.
-- **Refresh** — load GPS positions (`POST /api/map-positions`) and build the **Selected units table** (sort, filter, column visibility, Export XLSX).
-- **Live map** — OpenStreetMap markers with popups (label, coordinates, speed, last update). Collapsible table above the map.
+1. Reuse the same **filter → objects → sensors** flow; set a **multiplier** per series.
+2. **Step 4 — Timeframe:** From / To (or try last 24 hours if empty).
+3. Optional **Report name** and **Description** (included in exports).
+4. **Generate report** produces:
+   - Multi-series **graph** (drag-to-zoom, Reset, clickable legend)
+   - **Raw data** table (by timestamp)
+   - **Summary** table (by date: Min, Max, Avg)
+5. **Exports:** Import/Export **JSON**, **HTML**, **PDF** (jsPDF); per-table **XLSX** (ExcelJS). Tables support search, sort, and pagination.
 
-See **[docs/USER_GUIDE.md](docs/USER_GUIDE.md)** for step-by-step usage.
+### Map
+
+Show where units are now, with optional telemetry filters.
+
+1. **Business entity** — Objects, Vehicles, Employees, Departments, Groups, Tags, Sensor types, or Sensor names.
+2. **Select values** — multi-select (empty = all for that dimension); search / select all / clear.
+3. **Conditions (optional)** — keep only units whose latest input/state values match rules (`>`, `<`, `=`, `between`).
+4. **Refresh** loads positions via `POST /api/map-positions` and fills a sortable **units table** (column visibility, XLSX export).
+5. **Live map** — OpenStreetMap markers with popups (label, coordinates, speed, last update).
+
+Step-by-step usage: **[docs/USER_GUIDE.md](docs/USER_GUIDE.md)**.
 
 ### Auth and data source
 
@@ -117,11 +136,13 @@ See **[docs/USER_GUIDE.md](docs/USER_GUIDE.md)** for step-by-step usage.
 
 ## Documentation
 
-- **[docs/USER_GUIDE.md](docs/USER_GUIDE.md)** — How to use Dashboards, Reports, and Map (steps, grouping, export/import).
+- **[docs/USER_GUIDE.md](docs/USER_GUIDE.md)** — How to use Dashboards, Reports, and Map.
 - **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** — Stack, data flow, backend/frontend layout.
 - **[docs/CONFIGURATION.md](docs/CONFIGURATION.md)** — Environment variables, CORS, app state, production checklist.
 - **[docs/API_OVERVIEW.md](docs/API_OVERVIEW.md)** — API endpoints and dashboard JSON format.
-- **[docs/RENDER.md](docs/RENDER.md)** — Deploy on Render (single-URL). **[docs/NAVIXY_APP_CONNECT.md](docs/NAVIXY_APP_CONNECT.md)** — Navixy App Connect setup.
+- **[docs/RENDER.md](docs/RENDER.md)** — Deploy on Render (single-URL). **[docs/RENDER_DEPLOY_CHECKLIST.md](docs/RENDER_DEPLOY_CHECKLIST.md)** — Deploy checklist.
+- **[docs/NAVIXY_APP_CONNECT.md](docs/NAVIXY_APP_CONNECT.md)** — Navixy App Connect setup.
+- **[SECURITY.md](SECURITY.md)** — Hardening notes for public deployments.
 
 ## Schema
 

@@ -18,6 +18,7 @@ if _env_path.is_file():
 
 import logging
 import os
+import secrets
 import time
 import uuid
 from collections import defaultdict
@@ -49,7 +50,22 @@ from .dsn_security import UnsafeDsnError, validate_dsn
 
 logger = logging.getLogger("sensoriqua")
 
-app = FastAPI(title="Sensoriqua", version="0.1.0")
+# OpenAPI: off by default when App Connect (JWT) is enabled; set ENABLE_OPENAPI=1 to expose /docs.
+_ENABLE_OPENAPI_RAW = os.environ.get("ENABLE_OPENAPI", "").strip().lower()
+if _ENABLE_OPENAPI_RAW in ("1", "true", "yes"):
+    _openapi_on = True
+elif _ENABLE_OPENAPI_RAW in ("0", "false", "no"):
+    _openapi_on = False
+else:
+    _openapi_on = not is_app_connect_enabled()
+
+app = FastAPI(
+    title="Sensoriqua",
+    version="0.1.0",
+    docs_url="/docs" if _openapi_on else None,
+    redoc_url="/redoc" if _openapi_on else None,
+    openapi_url="/openapi.json" if _openapi_on else None,
+)
 
 
 @app.exception_handler(UnsafeDsnError)
@@ -225,12 +241,32 @@ class AuthLoginRequest(BaseModel):
 
 # ---------- Navixy App Connect: auth endpoint ----------
 
-# Optional shared secret for login; rate limit per IP.
+# Shared secret for login (header X-Sensoriqua-Login-Key). Required when JWT is enabled
+# unless ALLOW_OPEN_LOGIN=1 (trusted private networks only).
 LOGIN_API_KEY = os.environ.get("LOGIN_API_KEY", "").strip()
+ALLOW_OPEN_LOGIN = os.environ.get("ALLOW_OPEN_LOGIN", "").strip().lower() in ("1", "true", "yes")
 LOGIN_RATE_LIMIT_PER_MINUTE = max(1, int(os.environ.get("LOGIN_RATE_LIMIT_PER_MINUTE", "30")))
 # Only trust X-Forwarded-For when behind a reverse proxy that sets it (otherwise spoofable).
 TRUST_PROXY = os.environ.get("TRUST_PROXY", "").strip().lower() in ("1", "true", "yes")
+# Refuse to start in standalone mode without JWT (use on public internet).
+REQUIRE_AUTH = os.environ.get("REQUIRE_AUTH", "").strip().lower() in ("1", "true", "yes")
 _login_attempts: dict[str, list[float]] = defaultdict(list)
+
+if REQUIRE_AUTH and not is_app_connect_enabled():
+    raise RuntimeError(
+        "REQUIRE_AUTH=1 but JWT_SECRET is missing or shorter than 32 characters. "
+        "Set a strong JWT_SECRET for public deployments."
+    )
+if is_app_connect_enabled() and not LOGIN_API_KEY and not ALLOW_OPEN_LOGIN:
+    logger.warning(
+        "JWT_SECRET is set but LOGIN_API_KEY is empty: login will be rejected until "
+        "LOGIN_API_KEY is set (or ALLOW_OPEN_LOGIN=1 for trusted private networks only)."
+    )
+if is_app_connect_enabled() and not TRUST_PROXY:
+    logger.warning(
+        "TRUST_PROXY is unset: login rate limiting uses the direct TCP peer. "
+        "Behind Render/nginx set TRUST_PROXY=1 so X-Forwarded-For is used."
+    )
 
 
 def _client_ip(request: Request) -> str:
@@ -254,6 +290,18 @@ def _check_login_rate_limit(request: Request) -> None:
     _login_attempts[ip].append(now)
 
 
+def _login_api_key_ok(provided: str | None) -> bool:
+    if not LOGIN_API_KEY:
+        return False
+    if not provided:
+        return False
+    a = provided.encode("utf-8")
+    b = LOGIN_API_KEY.encode("utf-8")
+    if len(a) != len(b):
+        return False
+    return secrets.compare_digest(a, b)
+
+
 def _validate_dsn_for_login(dsn: str, name: str) -> None:
     """Login-time DSN check; connect-time pin happens again in get_conn()."""
     try:
@@ -272,7 +320,7 @@ def auth_login(
     Navixy App Connect: middleware calls this with user info and DB URLs.
     Returns JWT; store iotDbUrl/userDbUrl server-side for this user.
     Requires JWT_SECRET (min 32 chars) in env.
-    Optional LOGIN_API_KEY: when set, require matching X-Sensoriqua-Login-Key header.
+    LOGIN_API_KEY required unless ALLOW_OPEN_LOGIN=1 (trusted networks only).
     Rate-limited per client IP. DSNs validated with DNS-aware private IP checks;
     every later get_conn() re-validates and pins hostaddr (DNS rebinding mitigation).
     """
@@ -282,9 +330,14 @@ def auth_login(
             detail="Navixy App Connect not configured (set JWT_SECRET with at least 32 characters)",
         )
     _check_login_rate_limit(request)
-    if LOGIN_API_KEY:
-        if not x_login_key or x_login_key != LOGIN_API_KEY:
-            raise HTTPException(status_code=401, detail="Invalid or missing login API key")
+    if not LOGIN_API_KEY:
+        if not ALLOW_OPEN_LOGIN:
+            raise HTTPException(
+                status_code=503,
+                detail="LOGIN_API_KEY must be configured for App Connect (or set ALLOW_OPEN_LOGIN=1 only on trusted private networks)",
+            )
+    elif not _login_api_key_ok(x_login_key):
+        raise HTTPException(status_code=401, detail="Invalid or missing login API key")
     if not body.email or not body.iotDbUrl or not body.userDbUrl:
         raise HTTPException(
             status_code=400,
@@ -1154,9 +1207,11 @@ def add_configured_sensor(
                 status_code=503,
                 detail="Configured sensors table not found. Add to backend/.env: SENSORIQUA_APP_STATE_DSN=sqlite:///./sensoriqua_state.db to use local storage without DB migrations (no app_sensoriqua schema required).",
             )
-        raise HTTPException(status_code=500, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("configured_sensors create failed (UndefinedTable)")
+        raise HTTPException(status_code=500, detail="Internal server error")
+    except Exception:
+        logger.exception("configured_sensors create failed")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @app.patch("/api/configured-sensors/{configured_sensor_id:int}")

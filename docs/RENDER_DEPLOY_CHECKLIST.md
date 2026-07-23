@@ -34,10 +34,13 @@ Locally you can reproduce with:
 |-----|--------|
 | `PYTHON_VERSION` | `3.11` |
 | `NODE_VERSION` | `20.18.0` (**required** so `npm` works on a Python service) |
+| `TRUST_PROXY` | `1` (Render reverse proxy) |
 | `SENSORIQUA_APP_STATE_DSN` | `sqlite:///sensoriqua_state.db` (or disk path) |
 | `JWT_SECRET` | Secret, ≥32 chars (Navixy) |
+| `LOGIN_API_KEY` | Secret; middleware sends `X-Sensoriqua-Login-Key` (**required** with JWT on public deploys) |
 | `CORS_ORIGINS` | Your Render URL, e.g. `https://<name>.onrender.com` |
-| `SENSORIQUA_DSN` | Only for standalone (no Navixy) |
+| `SENSORIQUA_DSN` | Only for standalone (no JWT); do not expose standalone publicly |
+| `REQUIRE_AUTH` | `1` recommended on public URLs (refuse start without JWT) |
 
 ## 3. Deploy steps
 

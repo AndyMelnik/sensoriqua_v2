@@ -12,9 +12,14 @@ Set these in **`backend/.env`** (never commit this file). Copy from **`backend/.
 |----------|-------------|
 | **SENSORIQUA_DSN** | PostgreSQL connection string for telematics/business data (e.g. `postgresql://user:password@host:port/database?sslmode=require`). Used in standalone mode (no JWT). |
 | **JWT_SECRET** | Optional. If set and at least 32 characters, enables Navixy App Connect: `POST /api/auth/login`, Bearer auth, per-user DSNs. Generate with e.g. `openssl rand -hex 32`. |
-| **LOGIN_API_KEY** | Optional. When set, `POST /api/auth/login` requires header `X-Sensoriqua-Login-Key` matching this value. |
+| **LOGIN_API_KEY** | **Required** with JWT on public deploys. `POST /api/auth/login` requires header `X-Sensoriqua-Login-Key`. |
+| **ALLOW_OPEN_LOGIN** | Only on trusted private networks: allow login without `LOGIN_API_KEY` (default off). |
+| **REQUIRE_AUTH** | If `1`, process exits unless `JWT_SECRET` ≥ 32 chars (recommended on public internet). |
 | **LOGIN_RATE_LIMIT_PER_MINUTE** | Max login attempts per client IP per minute (default `30`). |
-| **TRUST_PROXY** | Set to `1` only behind a reverse proxy that sets/overwrites `X-Forwarded-For`. When unset, login rate limiting uses the TCP peer address (recommended for direct exposure). |
+| **TRUST_PROXY** | Set to `1` only behind a reverse proxy that sets/overwrites `X-Forwarded-For` (use on Render). |
+| **ENABLE_OPENAPI** | `1` to expose `/docs`; default off when JWT is enabled. |
+| **CREDENTIALS_ENCRYPTION_KEY** | Optional ≥32-char key to encrypt stored App Connect DSNs (falls back to `JWT_SECRET`). |
+| **CREDENTIALS_MAX_ENTRIES** | Max stored App Connect sessions (default `1000`; oldest pruned). |
 | **SENSORIQUA_CREDENTIALS_PATH** | Optional path to persist App Connect DSNs across restarts (default `backend/sensoriqua_credentials.json`, gitignored). |
 | **CORS_ORIGINS** | Comma-separated list of allowed frontend origins. When **JWT_SECRET** is set and this is empty, cross-origin browser API calls are blocked (same-origin static GUI still works). When JWT is off and empty, uses `allow_origins=["*"]` with `allow_credentials=False`. |
 | **ALLOW_FRAME_ORIGINS** | Iframe embedding. Empty = `frame-ancestors *`. Comma-separated origins = restrict to those. `deny` = `X-Frame-Options: DENY`. |

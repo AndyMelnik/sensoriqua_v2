@@ -23,10 +23,11 @@ Sensoriqua can be used with **Navixy App Connect**, an authentication gateway th
    JWT_SECRET=<your-generated-secret>
    ```
 
-2. **Auth endpoint**: Sensoriqua implements **POST /api/auth/login** as required by the [Navixy App Connect contract](https://docs.navixy.com/). The endpoint is only active when `JWT_SECRET` is set (at least 32 characters). Optional hardening:
-   - `LOGIN_API_KEY` — require header `X-Sensoriqua-Login-Key` (set the same value in the middleware if it supports custom headers).
-   - Per-IP rate limiting (`LOGIN_RATE_LIMIT_PER_MINUTE`, default 30). Uses `X-Forwarded-For` only when `TRUST_PROXY=1`.
+2. **Auth endpoint**: Sensoriqua implements **POST /api/auth/login** as required by the [Navixy App Connect contract](https://docs.navixy.com/). The endpoint is only active when `JWT_SECRET` is set (at least 32 characters). Hardening:
+   - **`LOGIN_API_KEY` (required on public deploys)** — middleware must send header `X-Sensoriqua-Login-Key`. Only use `ALLOW_OPEN_LOGIN=1` on trusted private networks.
+   - Per-IP rate limiting (`LOGIN_RATE_LIMIT_PER_MINUTE`, default 30). Uses `X-Forwarded-For` only when `TRUST_PROXY=1` (set on Render).
    - Login DSNs are validated with DNS resolution; private IPs are rejected unless `ALLOW_PRIVATE_DSN=1`. Every DB connect re-validates and pins `hostaddr` (DNS rebinding mitigation).
+   - Stored DSNs are encrypted at rest when `JWT_SECRET` / `CREDENTIALS_ENCRYPTION_KEY` is set.
 
 3. **API behavior**: When `JWT_SECRET` is set (App Connect enabled), every `/api/*` route **except** `POST /api/auth/login` **requires** a valid `Authorization: Bearer <token>` header. The DSN and user identity come only from that token (server-stored `iotDbUrl` / `userDbUrl`). There is **no** fallback to `X-Sensoriqua-DSN` or query `user_id` in this mode. Standalone mode (no JWT / short secret) uses env `SENSORIQUA_DSN` only; client DSN/`user_id` overrides require explicit `ALLOW_CLIENT_DSN` / `ALLOW_CLIENT_USER_ID` and must not be used on the public internet.
 

@@ -8,13 +8,16 @@ This document summarizes security measures and a pre-publish checklist for deplo
 - **Algorithm:** Tokens are signed with HS256; the backend decodes only with `algorithms=[JWT_ALGORITHM]` (no `alg=none` or algorithm confusion).
 - **Secrets:** `JWT_SECRET` must be at least 32 characters. Generate with e.g. `openssl rand -hex 32`. Never commit `.env` or real secrets.
 - **Per-user data:** DSN (iotDbUrl/userDbUrl) is stored server-side keyed by user (in memory + `sensoriqua_credentials.json` by default); each request uses only the DSN for the token’s user.
-- **Login hardening:** Optional `LOGIN_API_KEY` (header `X-Sensoriqua-Login-Key`); per-IP rate limit (`LOGIN_RATE_LIMIT_PER_MINUTE`, default 30). Rate-limit IP uses `X-Forwarded-For` only when `TRUST_PROXY=1`.
+- **Login hardening:** `LOGIN_API_KEY` is **required** when `JWT_SECRET` is set (header `X-Sensoriqua-Login-Key`), unless `ALLOW_OPEN_LOGIN=1` on a trusted private network. Compared with `secrets.compare_digest`. Per-IP rate limit (`LOGIN_RATE_LIMIT_PER_MINUTE`, default 30). Rate-limit IP uses `X-Forwarded-For` only when `TRUST_PROXY=1` (set this on Render).
+- **Credentials at rest:** App Connect DSNs are encrypted (Fernet) when `JWT_SECRET` or `CREDENTIALS_ENCRYPTION_KEY` is ≥32 characters. Oldest sessions are pruned above `CREDENTIALS_MAX_ENTRIES` (default 1000).
+- **OpenAPI:** `/docs` is disabled by default when App Connect is on; set `ENABLE_OPENAPI=1` to expose.
 
 ## Standalone mode (no JWT)
 
 - Uses `SENSORIQUA_DSN` and `SENSORIQUA_USER_ID` from the environment only.
 - **`X-Sensoriqua-DSN` and `?user_id=` are ignored by default** (prevents IDOR and client-chosen databases).
 - Enable only for local debugging: `ALLOW_CLIENT_DSN=1` and/or `ALLOW_CLIENT_USER_ID=1`, plus frontend `VITE_ALLOW_CLIENT_DSN=1` if the UI should send a DSN header. Never enable on a public deployment.
+- Set **`REQUIRE_AUTH=1`** on public hosts so the process refuses to start without a valid `JWT_SECRET`.
 
 ## Login endpoint and SSRF
 
@@ -62,10 +65,10 @@ The backend adds:
 
 1. **No secrets in repo:** Confirm no `.env` or real credentials are committed.
 2. **CORS:** With Navixy/JWT, set `CORS_ORIGINS` to your frontend origin(s).
-3. **JWT_SECRET** and **LOGIN_API_KEY** for any internet-reachable App Connect deployment (treat the login key as required on the public internet).
+3. **JWT_SECRET**, **LOGIN_API_KEY**, and **CORS_ORIGINS** for any internet-reachable App Connect deployment. Set **TRUST_PROXY=1** behind Render/nginx. Optionally **REQUIRE_AUTH=1**.
 4. **SSRF:** Leave `ALLOW_PRIVATE_DSN` unset on public internet-facing login. Connect-time `hostaddr` pinning is always applied.
-5. **Standalone locks:** Leave `ALLOW_CLIENT_DSN` and `ALLOW_CLIENT_USER_ID` unset in production.
-6. **Proxy:** Set `TRUST_PROXY=1` only behind a reverse proxy that overwrites `X-Forwarded-For`; otherwise leave unset so login rate limits use the real TCP peer.
+5. **Standalone locks:** Leave `ALLOW_CLIENT_DSN` and `ALLOW_CLIENT_USER_ID` unset in production. Do not expose standalone (no JWT) on the public internet.
+6. **OpenAPI:** Leave `ENABLE_OPENAPI` unset (docs off with JWT) unless you intentionally need `/docs`.
 7. **HTTPS:** Serve the API and frontend over HTTPS in production.
 
 ## Client-side storage (localStorage)
