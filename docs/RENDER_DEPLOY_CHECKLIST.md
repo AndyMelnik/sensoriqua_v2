@@ -37,7 +37,7 @@ Locally you can reproduce with:
 | `TRUST_PROXY` | `1` (Render reverse proxy) |
 | `SENSORIQUA_APP_STATE_DSN` | `sqlite:///sensoriqua_state.db` (or disk path) |
 | `JWT_SECRET` | Secret, ≥32 chars (Navixy) |
-| `LOGIN_API_KEY` | Secret; middleware sends `X-Sensoriqua-Login-Key` (**required** with JWT on public deploys) |
+| `LOGIN_API_KEY` | Optional; **leave unset** for standard Navixy App Connect (middleware has no custom login header) |
 | `CORS_ORIGINS` | Your Render URL, e.g. `https://<name>.onrender.com` |
 | `SENSORIQUA_DSN` | Only for standalone (no JWT); do not expose standalone publicly |
 | `REQUIRE_AUTH` | `1` recommended on public URLs (refuse start without JWT) |

@@ -241,10 +241,9 @@ class AuthLoginRequest(BaseModel):
 
 # ---------- Navixy App Connect: auth endpoint ----------
 
-# Shared secret for login (header X-Sensoriqua-Login-Key). Required when JWT is enabled
-# unless ALLOW_OPEN_LOGIN=1 (trusted private networks only).
+# Shared secret for login (header X-Sensoriqua-Login-Key). Optional for standard
+# Navixy App Connect (middleware usually cannot send custom headers). When set, it is enforced.
 LOGIN_API_KEY = os.environ.get("LOGIN_API_KEY", "").strip()
-ALLOW_OPEN_LOGIN = os.environ.get("ALLOW_OPEN_LOGIN", "").strip().lower() in ("1", "true", "yes")
 LOGIN_RATE_LIMIT_PER_MINUTE = max(1, int(os.environ.get("LOGIN_RATE_LIMIT_PER_MINUTE", "30")))
 # Only trust X-Forwarded-For when behind a reverse proxy that sets it (otherwise spoofable).
 TRUST_PROXY = os.environ.get("TRUST_PROXY", "").strip().lower() in ("1", "true", "yes")
@@ -257,10 +256,11 @@ if REQUIRE_AUTH and not is_app_connect_enabled():
         "REQUIRE_AUTH=1 but JWT_SECRET is missing or shorter than 32 characters. "
         "Set a strong JWT_SECRET for public deployments."
     )
-if is_app_connect_enabled() and not LOGIN_API_KEY and not ALLOW_OPEN_LOGIN:
+if is_app_connect_enabled() and not LOGIN_API_KEY:
     logger.warning(
-        "JWT_SECRET is set but LOGIN_API_KEY is empty: login will be rejected until "
-        "LOGIN_API_KEY is set (or ALLOW_OPEN_LOGIN=1 for trusted private networks only)."
+        "JWT_SECRET is set without LOGIN_API_KEY: /api/auth/login accepts Navixy middleware "
+        "without a shared secret (App Connect default). Set LOGIN_API_KEY if your middleware "
+        "can send X-Sensoriqua-Login-Key."
     )
 if is_app_connect_enabled() and not TRUST_PROXY:
     logger.warning(
@@ -292,7 +292,7 @@ def _check_login_rate_limit(request: Request) -> None:
 
 def _login_api_key_ok(provided: str | None) -> bool:
     if not LOGIN_API_KEY:
-        return False
+        return True
     if not provided:
         return False
     a = provided.encode("utf-8")
@@ -320,7 +320,8 @@ def auth_login(
     Navixy App Connect: middleware calls this with user info and DB URLs.
     Returns JWT; store iotDbUrl/userDbUrl server-side for this user.
     Requires JWT_SECRET (min 32 chars) in env.
-    LOGIN_API_KEY required unless ALLOW_OPEN_LOGIN=1 (trusted networks only).
+    Optional LOGIN_API_KEY: when set, require matching X-Sensoriqua-Login-Key
+    (standard Navixy middleware does not send this header — leave LOGIN_API_KEY unset).
     Rate-limited per client IP. DSNs validated with DNS-aware private IP checks;
     every later get_conn() re-validates and pins hostaddr (DNS rebinding mitigation).
     """
@@ -330,13 +331,9 @@ def auth_login(
             detail="Navixy App Connect not configured (set JWT_SECRET with at least 32 characters)",
         )
     _check_login_rate_limit(request)
-    if not LOGIN_API_KEY:
-        if not ALLOW_OPEN_LOGIN:
-            raise HTTPException(
-                status_code=503,
-                detail="LOGIN_API_KEY must be configured for App Connect (or set ALLOW_OPEN_LOGIN=1 only on trusted private networks)",
-            )
-    elif not _login_api_key_ok(x_login_key):
+    # When LOGIN_API_KEY is configured, enforce it. When empty, allow Navixy middleware login
+    # (App Connect contract has no shared-secret header).
+    if LOGIN_API_KEY and not _login_api_key_ok(x_login_key):
         raise HTTPException(status_code=401, detail="Invalid or missing login API key")
     if not body.email or not body.iotDbUrl or not body.userDbUrl:
         raise HTTPException(
@@ -348,6 +345,7 @@ def auth_login(
     user_id = str(uuid.uuid4())
     store_credentials(user_id, body.iotDbUrl, body.userDbUrl)
     token = create_token(user_id, body.email, body.role or "admin")
+    logger.info("App Connect login ok for email=%s user_id=%s", body.email, user_id)
     return {
         "success": True,
         "user": {"id": user_id, "email": body.email, "role": body.role or "admin"},

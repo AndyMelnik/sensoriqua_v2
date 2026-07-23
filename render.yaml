@@ -29,7 +29,8 @@ services:
         value: "sqlite:///sensoriqua_state.db"
       # Set in Render Dashboard → Environment (Secrets):
       # JWT_SECRET — required for Navixy (min 32 chars)
-      # LOGIN_API_KEY — required with JWT (middleware sends X-Sensoriqua-Login-Key); or ALLOW_OPEN_LOGIN=1 only on private nets
+      # LOGIN_API_KEY — optional; leave UNSET for standard Navixy App Connect (middleware has no custom header)
       # CORS_ORIGINS — your Render URL, e.g. https://sensoriqua.onrender.com
+      # ALLOW_PRIVATE_DSN=1 — only if Navixy iotDbUrl/userDbUrl point at private IPs
       # SENSORIQUA_DSN — standalone only (no JWT); do not use unauthenticated standalone on the public internet
       # REQUIRE_AUTH=1 — refuse to start without JWT (recommended for public URLs)

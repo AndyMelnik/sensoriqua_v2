@@ -12,8 +12,8 @@ Set these in **`backend/.env`** (never commit this file). Copy from **`backend/.
 |----------|-------------|
 | **SENSORIQUA_DSN** | PostgreSQL connection string for telematics/business data (e.g. `postgresql://user:password@host:port/database?sslmode=require`). Used in standalone mode (no JWT). |
 | **JWT_SECRET** | Optional. If set and at least 32 characters, enables Navixy App Connect: `POST /api/auth/login`, Bearer auth, per-user DSNs. Generate with e.g. `openssl rand -hex 32`. |
-| **LOGIN_API_KEY** | **Required** with JWT on public deploys. `POST /api/auth/login` requires header `X-Sensoriqua-Login-Key`. |
-| **ALLOW_OPEN_LOGIN** | Only on trusted private networks: allow login without `LOGIN_API_KEY` (default off). |
+| **LOGIN_API_KEY** | Optional. When set, `POST /api/auth/login` requires `X-Sensoriqua-Login-Key`. Leave unset for standard Navixy App Connect middleware. |
+| **ALLOW_OPEN_LOGIN** | Legacy/no-op for open login; Navixy works with empty `LOGIN_API_KEY`. |
 | **REQUIRE_AUTH** | If `1`, process exits unless `JWT_SECRET` ≥ 32 chars (recommended on public internet). |
 | **LOGIN_RATE_LIMIT_PER_MINUTE** | Max login attempts per client IP per minute (default `30`). |
 | **TRUST_PROXY** | Set to `1` only behind a reverse proxy that sets/overwrites `X-Forwarded-For` (use on Render). |

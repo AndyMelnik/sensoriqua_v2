@@ -31,3 +31,8 @@ def test_login_api_key_compare():
         assert main_mod._login_api_key_ok("wrong") is False
         assert main_mod._login_api_key_ok(None) is False
         assert main_mod._login_api_key_ok("abc123secretkeX") is False
+
+    # Empty LOGIN_API_KEY: Navixy App Connect default — allow without header
+    with patch.object(main_mod, "LOGIN_API_KEY", ""):
+        assert main_mod._login_api_key_ok(None) is True
+        assert main_mod._login_api_key_ok("") is True

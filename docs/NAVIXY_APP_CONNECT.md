@@ -24,10 +24,19 @@ Sensoriqua can be used with **Navixy App Connect**, an authentication gateway th
    ```
 
 2. **Auth endpoint**: Sensoriqua implements **POST /api/auth/login** as required by the [Navixy App Connect contract](https://docs.navixy.com/). The endpoint is only active when `JWT_SECRET` is set (at least 32 characters). Hardening:
-   - **`LOGIN_API_KEY` (required on public deploys)** — middleware must send header `X-Sensoriqua-Login-Key`. Only use `ALLOW_OPEN_LOGIN=1` on trusted private networks.
+   - **`LOGIN_API_KEY` (optional)** — if set, middleware must send `X-Sensoriqua-Login-Key`. **Standard Navixy middleware does not send custom headers**; leave `LOGIN_API_KEY` unset so iframe App Connect login works.
    - Per-IP rate limiting (`LOGIN_RATE_LIMIT_PER_MINUTE`, default 30). Uses `X-Forwarded-For` only when `TRUST_PROXY=1` (set on Render).
    - Login DSNs are validated with DNS resolution; private IPs are rejected unless `ALLOW_PRIVATE_DSN=1`. Every DB connect re-validates and pins `hostaddr` (DNS rebinding mitigation).
    - Stored DSNs are encrypted at rest when `JWT_SECRET` / `CREDENTIALS_ENCRYPTION_KEY` is set.
+
+### Troubleshooting iframe App Connect
+
+| Symptom | Likely cause |
+|---------|----------------|
+| `POST /api/auth/login` → **503** | Old builds required `LOGIN_API_KEY`. Upgrade, or remove `LOGIN_API_KEY` from Render env if middleware cannot send the header. |
+| `POST /api/auth/login` → **401** (login key) | `LOGIN_API_KEY` is set but middleware does not send `X-Sensoriqua-Login-Key` — clear the env var. |
+| `POST /api/auth/login` → **400** private network | Navixy DB URLs resolve to private IPs — set `ALLOW_PRIVATE_DSN=1` only in that trusted setup. |
+| `/api/*` → **401** after UI load | Login never succeeded, so no `auth_token` in the iframe `localStorage`. Fix login first; hard-refresh the app iframe. |
 
 3. **API behavior**: When `JWT_SECRET` is set (App Connect enabled), every `/api/*` route **except** `POST /api/auth/login` **requires** a valid `Authorization: Bearer <token>` header. The DSN and user identity come only from that token (server-stored `iotDbUrl` / `userDbUrl`). There is **no** fallback to `X-Sensoriqua-DSN` or query `user_id` in this mode. Standalone mode (no JWT / short secret) uses env `SENSORIQUA_DSN` only; client DSN/`user_id` overrides require explicit `ALLOW_CLIENT_DSN` / `ALLOW_CLIENT_USER_ID` and must not be used on the public internet.
 
