@@ -55,6 +55,22 @@ type ConfiguredSensor = {
   created_at?: string;
 };
 
+type DashboardPlane = {
+  dashboard_plane_id: number;
+  configured_sensor_id: number;
+  position_index: number;
+  object_id: number;
+  device_id: number;
+  sensor_input_label: string;
+  sensor_source?: string;
+  sensor_label_custom: string;
+  min_threshold: number | null;
+  max_threshold: number | null;
+  multiplier?: number | null;
+  object_label: string;
+  group_id?: string | null;
+};
+
 function normalizeSparklineHours(h: unknown): api.SparklineHours {
   const n = typeof h === 'number' ? h : Number(h);
   if (n === 2 || n === 4 || n === 8) return n;
@@ -115,6 +131,75 @@ function configuredIdsEqual(a: unknown, b: unknown): boolean {
   return normalizeConfiguredId(a) === normalizeConfiguredId(b);
 }
 
+function normalizePlaneId(id: unknown): number {
+  return normalizeConfiguredId(id);
+}
+
+function planeIdsEqual(a: unknown, b: unknown): boolean {
+  return normalizePlaneId(a) === normalizePlaneId(b);
+}
+
+function normalizeDashboardPlaneFromApi(row: Record<string, unknown>): DashboardPlane {
+  return {
+    dashboard_plane_id: normalizePlaneId(row.dashboard_plane_id),
+    configured_sensor_id: normalizeConfiguredId(row.configured_sensor_id),
+    position_index: Number(row.position_index) || 0,
+    object_id: Number(row.object_id),
+    device_id: Number(row.device_id),
+    sensor_input_label: String(row.sensor_input_label ?? ''),
+    sensor_source: (row.sensor_source as string) || 'input',
+    sensor_label_custom: String(row.sensor_label_custom ?? ''),
+    min_threshold: row.min_threshold != null && row.min_threshold !== '' ? Number(row.min_threshold) : null,
+    max_threshold: row.max_threshold != null && row.max_threshold !== '' ? Number(row.max_threshold) : null,
+    multiplier: row.multiplier != null && row.multiplier !== '' ? Number(row.multiplier) : null,
+    object_label: String(row.object_label ?? ''),
+    group_id: row.group_id != null && String(row.group_id).trim() !== '' ? String(row.group_id) : null,
+  };
+}
+
+function removeLocalConfiguredById(id: number): ConfiguredSensor[] {
+  const list = (api.getLocalConfiguredSensors() as Record<string, unknown>[])
+    .map(normalizeConfiguredFromApi)
+    .filter((c) => !configuredIdsEqual(c.configured_sensor_id, id));
+  api.setLocalConfiguredSensors(list);
+  const planes = (api.getLocalDashboardPlanes() as Record<string, unknown>[])
+    .map(normalizeDashboardPlaneFromApi)
+    .filter((p) => !configuredIdsEqual(p.configured_sensor_id, id));
+  api.setLocalDashboardPlanes(planes);
+  return list;
+}
+
+function removeLocalDashboardPlaneById(dashboardPlaneId: number): DashboardPlane[] {
+  const planes = (api.getLocalDashboardPlanes() as Record<string, unknown>[])
+    .map(normalizeDashboardPlaneFromApi)
+    .filter((p) => !planeIdsEqual(p.dashboard_plane_id, dashboardPlaneId));
+  api.setLocalDashboardPlanes(planes);
+  return planes;
+}
+
+function addLocalDashboardPlaneFromConfigured(c: ConfiguredSensor): DashboardPlane[] {
+  const planes = (api.getLocalDashboardPlanes() as Record<string, unknown>[]).map(normalizeDashboardPlaneFromApi);
+  if (planes.some((p) => configuredIdsEqual(p.configured_sensor_id, c.configured_sensor_id))) {
+    return planes;
+  }
+  planes.push({
+    dashboard_plane_id: -Date.now(),
+    configured_sensor_id: c.configured_sensor_id,
+    position_index: planes.length,
+    object_id: c.object_id,
+    device_id: c.device_id,
+    sensor_input_label: c.sensor_input_label,
+    sensor_source: c.sensor_source,
+    sensor_label_custom: c.sensor_label_custom,
+    min_threshold: c.min_threshold,
+    max_threshold: c.max_threshold,
+    multiplier: c.multiplier,
+    object_label: c.object_label,
+  });
+  api.setLocalDashboardPlanes(planes);
+  return planes;
+}
+
 function configuredSensorFromForm(
   form: ConfigForm,
   minVal: number | null,
@@ -139,21 +224,6 @@ function configuredSensorFromForm(
     created_at: existing?.created_at,
   };
 }
-type DashboardPlane = {
-  dashboard_plane_id: number;
-  configured_sensor_id: number;
-  position_index: number;
-  object_id: number;
-  device_id: number;
-  sensor_input_label: string;
-  sensor_source?: string;
-  sensor_label_custom: string;
-  min_threshold: number | null;
-  max_threshold: number | null;
-  multiplier?: number | null;
-  object_label: string;
-  group_id?: string | null;
-};
 
 const GROUPING_LABELS: Record<GroupingType, string> = {
   groups: 'Groups',
@@ -197,6 +267,47 @@ function scaleValue(v: number | null, mult: number | null | undefined): number |
   return v * m;
 }
 
+/** Scale raw sparkline points the same way in Configured sensors and Dashboard. */
+function scaleSparkSeries(
+  raw: { ts: string; value: number | null }[] | undefined,
+  mult: number | null | undefined
+): { ts: string; value: number | null }[] {
+  return (raw ?? []).map((d) => ({
+    ts: d.ts,
+    value: scaleValue(toFiniteNumber(d.value), mult),
+  }));
+}
+
+/** Latest non-null point from a scaled sparkline series. */
+function lastScaledSparkValue(data: { ts: string; value: number | null }[]): number | null {
+  for (let i = data.length - 1; i >= 0; i -= 1) {
+    const v = toFiniteNumber(data[i]?.value);
+    if (v != null) return v;
+  }
+  return null;
+}
+
+/**
+ * One live value for thresholds/display: prefer latest-values (current reading),
+ * else fall back to the last sparkline point (shared series).
+ */
+function resolveLiveDisplayValue(
+  scaledSpark: { ts: string; value: number | null }[],
+  latestRaw: unknown,
+  mult: number | null | undefined
+): number | null {
+  const fromLatest = scaleValue(toFiniteNumber(latestRaw), mult);
+  if (fromLatest != null) return fromLatest;
+  return lastScaledSparkValue(scaledSpark);
+}
+
+/** DOM-safe data-ok: React drops boolean false, so use string tokens for CSS. */
+function dataOkAttr(status: 'ok' | 'alarm' | 'neutral'): 'true' | 'false' | undefined {
+  if (status === 'ok') return 'true';
+  if (status === 'alarm') return 'false';
+  return undefined;
+}
+
 /** Border/sparkline status vs thresholds (display units after multiplier). */
 function thresholdStatus(val: number | null, min: unknown, max: unknown): 'ok' | 'alarm' | 'neutral' {
   const minN = toFiniteNumber(min);
@@ -206,6 +317,19 @@ function thresholdStatus(val: number | null, min: unknown, max: unknown): 'ok' |
   if (minN != null && val < minN) return 'alarm';
   if (maxN != null && val > maxN) return 'alarm';
   return 'ok';
+}
+
+function strokeForThresholdStatus(status: 'ok' | 'alarm' | 'neutral'): string {
+  if (status === 'ok') return '#22c55e';
+  if (status === 'alarm') return '#ef4444';
+  return '#0ea5e9';
+}
+
+/** Aggregate widget statuses into one group frame status. */
+function groupFrameStatus(statuses: Array<'ok' | 'alarm' | 'neutral'>): 'ok' | 'alarm' | 'neutral' {
+  if (statuses.some((s) => s === 'alarm')) return 'alarm';
+  if (statuses.length > 0 && statuses.every((s) => s === 'ok')) return 'ok';
+  return 'neutral';
 }
 
 export default function App() {
@@ -223,6 +347,7 @@ export default function App() {
   const [configModal, setConfigModal] = useState<ConfigForm | null>(null);
   const [editingConfigId, setEditingConfigId] = useState<number | null>(null);
   const [configured, setConfigured] = useState<ConfiguredSensor[]>([]);
+  const [configuredSearch, setConfiguredSearch] = useState('');
   const [sparklineData, setSparklineData] = useState<Record<string, { ts: string; value: number | null }[]>>({});
   const [dashboardPlanes, setDashboardPlanes] = useState<DashboardPlane[]>([]);
   const [dashboardGroups, setDashboardGroups] = useState<Record<string, { id: string; label: string }>>(
@@ -423,18 +548,10 @@ export default function App() {
       return;
     }
     try {
-      const list = await api.getConfiguredSensors();
-      if (list.length === 0) {
-        const local = api.getLocalConfiguredSensors() as ConfiguredSensor[];
-        if (local.length > 0) {
-          setUseLocalConfig(true);
-          setConfigured(local.map(normalizeConfiguredFromApi));
-          return;
-        }
-      }
-      const normalized = (list as Record<string, unknown>[]).map(normalizeConfiguredFromApi);
-      setConfigured(normalized);
-      api.setLocalConfiguredSensors(normalized);
+      const list = ((await api.getConfiguredSensors()) as Record<string, unknown>[]).map(normalizeConfiguredFromApi);
+      // Empty server list is valid — never revive stale localStorage as source of truth.
+      setConfigured(list);
+      api.setLocalConfiguredSensors(list);
     } catch (e) {
       const is503 = e instanceof api.ApiError && e.debug?.status === 503;
       if (is503) {
@@ -459,26 +576,20 @@ export default function App() {
 
   const loadDashboard = useCallback(async () => {
     if (useLocalConfig) {
-      const list = api.getLocalDashboardPlanes() as DashboardPlane[];
+      const list = (api.getLocalDashboardPlanes() as Record<string, unknown>[]).map(normalizeDashboardPlaneFromApi);
       setDashboardPlanes(applyGroupsToPlanes(list));
       return;
     }
     try {
-      const list = (await api.getDashboardPlanes()) as DashboardPlane[];
-      if (list.length === 0) {
-        const local = api.getLocalDashboardPlanes() as DashboardPlane[];
-        if (local.length > 0) {
-          setUseLocalConfig(true);
-          setDashboardPlanes(applyGroupsToPlanes(local));
-          return;
-        }
-      }
+      const list = ((await api.getDashboardPlanes()) as Record<string, unknown>[]).map(normalizeDashboardPlaneFromApi);
+      // Empty server list is valid — do not restore deleted widgets from localStorage.
       setDashboardPlanes(applyGroupsToPlanes(list));
+      api.setLocalDashboardPlanes(list);
     } catch (e) {
       const is503 = e instanceof api.ApiError && e.debug?.status === 503;
       if (is503) {
         setUseLocalConfig(true);
-        const list = api.getLocalDashboardPlanes() as DashboardPlane[];
+        const list = (api.getLocalDashboardPlanes() as Record<string, unknown>[]).map(normalizeDashboardPlaneFromApi);
         setDashboardPlanes(applyGroupsToPlanes(list));
       }
     }
@@ -488,7 +599,10 @@ export default function App() {
   useEffect(() => { loadDashboard(); }, [loadDashboard]);
 
   const loadSparklines = useCallback(async () => {
-    if (configured.length === 0) return;
+    if (configured.length === 0) {
+      setSparklineData({});
+      return;
+    }
     try {
       const pairs = configured.map((c) => ({
         device_id: c.device_id,
@@ -501,27 +615,46 @@ export default function App() {
     } catch (_) {}
   }, [configured]);
 
-  useEffect(() => { loadSparklines(); }, [configured, loadSparklines]);
-
   const loadDashboardValues = useCallback(async () => {
-    if (dashboardPlanes.length === 0) return;
+    // Pull latest for every configured sensor so Configured + Dashboard share one value map.
+    const sources =
+      configured.length > 0
+        ? configured
+        : dashboardPlanes.map((p) => ({
+            device_id: p.device_id,
+            sensor_input_label: p.sensor_input_label,
+            sensor_source: p.sensor_source,
+          }));
+    if (sources.length === 0) {
+      setDashboardValues({});
+      return;
+    }
     try {
-      const pairs = dashboardPlanes.map((p) => ({
-        device_id: p.device_id,
-        sensor_input_label: p.sensor_input_label,
-        sensor_source: (p.sensor_source as 'input' | 'state' | 'tracking') || 'input',
+      const pairs = sources.map((s) => ({
+        device_id: s.device_id,
+        sensor_input_label: s.sensor_input_label,
+        sensor_source: (s.sensor_source as 'input' | 'state' | 'tracking') || 'input',
       }));
       const res = await api.getLatestValues(pairs);
       setDashboardValues(res.values || {});
     } catch (_) {}
-  }, [dashboardPlanes]);
+  }, [configured, dashboardPlanes]);
 
-  useEffect(() => { loadDashboardValues(); }, [dashboardPlanes, loadDashboardValues]);
+  const refreshTelemetry = useCallback(async () => {
+    await Promise.all([loadSparklines(), loadDashboardValues()]);
+  }, [loadSparklines, loadDashboardValues]);
+
+  useEffect(() => {
+    void refreshTelemetry();
+  }, [refreshTelemetry]);
+
   useEffect(() => {
     const ms = dashboardUpdateSeconds * 1000;
-    const t = setInterval(loadDashboardValues, ms);
+    const t = setInterval(() => {
+      void refreshTelemetry();
+    }, ms);
     return () => clearInterval(t);
-  }, [loadDashboardValues, dashboardUpdateSeconds]);
+  }, [refreshTelemetry, dashboardUpdateSeconds]);
 
   useEffect(() => {
     if (!historyPlane) {
@@ -674,14 +807,10 @@ export default function App() {
     const editId = editIdRaw != null ? normalizeConfiguredId(editIdRaw) : null;
 
     const applyConfiguredPatch = (list: ConfiguredSensor[]): ConfiguredSensor[] => {
-      if (!editId) return list;
-      const has = list.some((c) => configuredIdsEqual(c.configured_sensor_id, editId));
+      const id = editId ?? -Date.now();
       const row = configuredSensorFromForm(form, minVal, maxVal, multVal, sparklineHours, existingBySlot);
-      row.configured_sensor_id = editId;
-      if (has) {
-        return list.map((c) => (configuredIdsEqual(c.configured_sensor_id, editId) ? { ...c, ...row } : c));
-      }
-      return [...list, row];
+      row.configured_sensor_id = id;
+      return mergeConfiguredList(list, row);
     };
 
     const syncDashboardThresholds = (id: number) => {
@@ -704,15 +833,23 @@ export default function App() {
     };
 
     if (useLocalConfig) {
-      const list = applyConfiguredPatch(api.getLocalConfiguredSensors() as ConfiguredSensor[]);
+      const list = applyConfiguredPatch(
+        (api.getLocalConfiguredSensors() as Record<string, unknown>[]).map(normalizeConfiguredFromApi)
+      );
       api.setLocalConfiguredSensors(list);
       setConfigured(list);
       setConfigModal(null);
       setEditingConfigId(null);
-      if (editId) syncDashboardThresholds(editId);
+      const savedId = list.find((c) =>
+        c.object_id === form.object_id &&
+        c.device_id === form.device_id &&
+        c.sensor_input_label === form.sensor_input_label &&
+        (c.sensor_source || 'input') === source
+      )?.configured_sensor_id;
+      if (savedId != null) syncDashboardThresholds(savedId);
       loadDashboard();
       setHistoryPlane((prev) =>
-        prev && editId != null && configuredIdsEqual(prev.configured_sensor_id, editId)
+        prev && savedId != null && configuredIdsEqual(prev.configured_sensor_id, savedId)
           ? { ...prev, min_threshold: minVal, max_threshold: maxVal, multiplier: multVal, sensor_label_custom: form.sensor_label_custom }
           : prev
       );
@@ -780,15 +917,23 @@ export default function App() {
       const is503 = e instanceof api.ApiError && e.debug?.status === 503;
       if (is503) {
         setUseLocalConfig(true);
-        const list = applyConfiguredPatch(api.getLocalConfiguredSensors() as ConfiguredSensor[]);
+        const list = applyConfiguredPatch(
+          (api.getLocalConfiguredSensors() as Record<string, unknown>[]).map(normalizeConfiguredFromApi)
+        );
         api.setLocalConfiguredSensors(list);
         setConfigured(list);
         setConfigModal(null);
         setEditingConfigId(null);
-        if (editId) syncDashboardThresholds(editId);
+        const savedId = list.find((c) =>
+          c.object_id === form.object_id &&
+          c.device_id === form.device_id &&
+          c.sensor_input_label === form.sensor_input_label &&
+          (c.sensor_source || 'input') === source
+        )?.configured_sensor_id;
+        if (savedId != null) syncDashboardThresholds(savedId);
         loadDashboard();
         setHistoryPlane((prev) =>
-          prev && editId != null && configuredIdsEqual(prev.configured_sensor_id, editId)
+          prev && savedId != null && configuredIdsEqual(prev.configured_sensor_id, savedId)
             ? { ...prev, min_threshold: minVal, max_threshold: maxVal, multiplier: multVal, sensor_label_custom: form.sensor_label_custom }
             : prev
         );
@@ -823,23 +968,24 @@ export default function App() {
       onConfirm: async () => {
         setConfirmDialog(null);
         if (useLocalConfig) {
-          const list = (api.getLocalConfiguredSensors() as ConfiguredSensor[]).filter((c) => c.configured_sensor_id !== id);
-          api.setLocalConfiguredSensors(list);
-          const planes = (api.getLocalDashboardPlanes() as DashboardPlane[]).filter((p) => p.configured_sensor_id !== id);
-          api.setLocalDashboardPlanes(planes);
-          loadConfigured();
+          const list = removeLocalConfiguredById(id);
+          setConfigured(list);
           loadDashboard();
           return;
         }
         try {
           await api.deleteConfiguredSensor(id);
-          loadConfigured();
-          loadDashboard();
+          setConfigured((prev) => prev.filter((c) => !configuredIdsEqual(c.configured_sensor_id, id)));
+          setDashboardPlanes((prev) => prev.filter((p) => !configuredIdsEqual(p.configured_sensor_id, id)));
+          await loadConfigured();
+          await loadDashboard();
         } catch (e) {
           const is503 = e instanceof api.ApiError && e.debug?.status === 503;
           if (is503) {
             setUseLocalConfig(true);
-            handleRemoveConfigured(id);
+            const list = removeLocalConfiguredById(id);
+            setConfigured(list);
+            loadDashboard();
           } else setError(e instanceof Error ? e.message : String(e));
         }
       },
@@ -847,52 +993,46 @@ export default function App() {
   };
 
   const addToDashboard = async (configured_sensor_id: number) => {
+    const c = configured.find((x) => configuredIdsEqual(x.configured_sensor_id, configured_sensor_id));
+    if (!c) return;
     if (useLocalConfig) {
-      const c = configured.find((x) => x.configured_sensor_id === configured_sensor_id);
-      if (!c) return;
-      const planes = api.getLocalDashboardPlanes() as DashboardPlane[];
-      const planeId = -Date.now();
-      planes.push({
-        dashboard_plane_id: planeId,
-        configured_sensor_id: c.configured_sensor_id,
-        position_index: planes.length,
-        object_id: c.object_id,
-        device_id: c.device_id,
-        sensor_input_label: c.sensor_input_label,
-        sensor_source: c.sensor_source,
-        sensor_label_custom: c.sensor_label_custom,
-        min_threshold: c.min_threshold,
-        max_threshold: c.max_threshold,
-        multiplier: c.multiplier,
-        object_label: c.object_label,
-      });
-      api.setLocalDashboardPlanes(planes);
-      loadDashboard();
+      const planes = addLocalDashboardPlaneFromConfigured(c);
+      setDashboardPlanes(applyGroupsToPlanes(planes));
       return;
     }
     try {
-      await api.addDashboardPlane(configured_sensor_id, dashboardPlanes.length);
-      loadDashboard();
+      await api.addDashboardPlane(c.configured_sensor_id, dashboardPlanes.length);
+      await loadDashboard();
     } catch (e) {
       const is503 = e instanceof api.ApiError && e.debug?.status === 503;
       if (is503) {
         setUseLocalConfig(true);
-        addToDashboard(configured_sensor_id);
+        const planes = addLocalDashboardPlaneFromConfigured(c);
+        setDashboardPlanes(applyGroupsToPlanes(planes));
       } else setError(e instanceof Error ? e.message : String(e));
     }
   };
 
   const removeFromDashboard = async (dashboard_plane_id: number) => {
+    const prevPlanes = dashboardPlanes;
+    setDashboardPlanes((prev) => prev.filter((p) => !planeIdsEqual(p.dashboard_plane_id, dashboard_plane_id)));
     if (useLocalConfig) {
-      const planes = (api.getLocalDashboardPlanes() as DashboardPlane[]).filter((p) => p.dashboard_plane_id !== dashboard_plane_id);
-      api.setLocalDashboardPlanes(planes);
-      loadDashboard();
+      removeLocalDashboardPlaneById(dashboard_plane_id);
       return;
     }
     try {
-      await api.removeDashboardPlane(dashboard_plane_id);
-      loadDashboard();
-    } catch (_) {}
+      await api.removeDashboardPlane(normalizePlaneId(dashboard_plane_id));
+      await loadDashboard();
+    } catch (e) {
+      const is503 = e instanceof api.ApiError && e.debug?.status === 503;
+      if (is503) {
+        setUseLocalConfig(true);
+        removeLocalDashboardPlaneById(dashboard_plane_id);
+        return;
+      }
+      setDashboardPlanes(prevPlanes);
+      setError(e instanceof Error ? e.message : String(e));
+    }
   };
 
   const confirmRemoveFromDashboard = (p: DashboardPlane) => {
@@ -968,6 +1108,21 @@ export default function App() {
   };
 
   const sparkKey = (deviceId: number, sensor: string, source: string = 'input') => `${deviceId}:${source}:${sensor}`;
+
+  const configuredSearchNeedle = configuredSearch.trim().toLowerCase();
+  const filteredConfigured = configuredSearchNeedle
+    ? configured.filter((c) => {
+        const objectLabel = (c.object_label || '').toLowerCase();
+        const sensorLabel = (c.sensor_label_custom || '').toLowerCase();
+        const inputLabel = (c.sensor_input_label || '').toLowerCase();
+        return (
+          objectLabel.includes(configuredSearchNeedle) ||
+          sensorLabel.includes(configuredSearchNeedle) ||
+          inputLabel.includes(configuredSearchNeedle)
+        );
+      })
+    : configured;
+
 
   const REPORT_COLORS = ['#0ea5e9', '#22c55e', '#eab308', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316'];
 
@@ -1501,9 +1656,13 @@ export default function App() {
             }
           }
           if (!useLocalConfig) {
-            currentConfigured = await api.getConfiguredSensors();
+            currentConfigured = ((await api.getConfiguredSensors()) as Record<string, unknown>[]).map(
+              normalizeConfiguredFromApi
+            );
           } else {
-            currentConfigured = api.getLocalConfiguredSensors() as ConfiguredSensor[];
+            currentConfigured = (api.getLocalConfiguredSensors() as Record<string, unknown>[]).map(
+              normalizeConfiguredFromApi
+            );
           }
           setConfigured(currentConfigured);
         } catch (e) {
@@ -2001,14 +2160,40 @@ export default function App() {
         <div className="center-panel">
           <section className="configured-section">
             <h4>Configured sensors</h4>
+            <input
+              type="search"
+              className="configured-search"
+              placeholder="Search by object or sensor…"
+              value={configuredSearch}
+              onChange={(e) => setConfiguredSearch(e.target.value)}
+              aria-label="Search configured sensors by object"
+            />
+            {configured.length > 0 && (
+              <div className="configured-search-meta">
+                Showing {filteredConfigured.length} of {configured.length}
+              </div>
+            )}
             <div className="configured-cards">
-              {configured.map((c) => {
+              {configured.length === 0 ? (
+                <p className="configured-empty hint">No configured sensors yet. Add sensors from the left panel.</p>
+              ) : filteredConfigured.length === 0 ? (
+                <p className="configured-empty hint">No sensors match “{configuredSearch.trim()}”.</p>
+              ) : (
+                filteredConfigured.map((c) => {
                 const key = sparkKey(c.device_id, c.sensor_input_label, c.sensor_source || 'input');
-                const rawData = sparklineData[key] || [];
-                const data = rawData.map((d) => ({ ...d, value: scaleValue(d.value, c.multiplier) }));
-                const isOnDashboard = dashboardPlanes.some((p) => p.configured_sensor_id === c.configured_sensor_id);
+                const data = scaleSparkSeries(sparklineData[key], c.multiplier);
+                const val = resolveLiveDisplayValue(data, dashboardValues[key]?.value, c.multiplier);
+                const status = thresholdStatus(val, c.min_threshold, c.max_threshold);
+                const stroke = strokeForThresholdStatus(status);
+                const isOnDashboard = dashboardPlanes.some((p) =>
+                  configuredIdsEqual(p.configured_sensor_id, c.configured_sensor_id)
+                );
                 return (
-                  <div key={c.configured_sensor_id} className={`configured-card${isOnDashboard ? ' configured-card-on-dashboard' : ''}`}>
+                  <div
+                    key={c.configured_sensor_id}
+                    className={`configured-card${isOnDashboard ? ' configured-card-on-dashboard' : ''}`}
+                    data-ok={dataOkAttr(status)}
+                  >
                     <div className="card-main">
                       <div className="card-header">
                         <span className="obj-label">{c.object_label}</span>
@@ -2022,6 +2207,8 @@ export default function App() {
                           showThresholds
                           min={c.min_threshold}
                           max={c.max_threshold}
+                          stroke={stroke}
+                          colorByThreshold={false}
                         />
                       </div>
                     </div>
@@ -2049,7 +2236,8 @@ export default function App() {
                     </div>
                   </div>
                 );
-              })}
+              })
+              )}
             </div>
           </section>
         </div>
@@ -2122,7 +2310,20 @@ export default function App() {
                 }
               });
 
-              const renderPlane = (p: DashboardPlane) => {
+              const planeStatus = (p: DashboardPlane): 'ok' | 'alarm' | 'neutral' => {
+                const cfg = configured.find((c) =>
+                  configuredIdsEqual(c.configured_sensor_id, p.configured_sensor_id)
+                );
+                const minTh = toFiniteNumber(cfg?.min_threshold ?? p.min_threshold);
+                const maxTh = toFiniteNumber(cfg?.max_threshold ?? p.max_threshold);
+                const mult = toFiniteNumber(cfg?.multiplier ?? p.multiplier);
+                const key = sparkKey(p.device_id, p.sensor_input_label, p.sensor_source || 'input');
+                const data = scaleSparkSeries(sparklineData[key], mult);
+                const val = resolveLiveDisplayValue(data, dashboardValues[key]?.value, mult);
+                return thresholdStatus(val, minTh, maxTh);
+              };
+
+              const renderPlane = (p: DashboardPlane, inGroup = false) => {
                 // Prefer live configured-sensor thresholds (local planes can be stale after edit).
                 const cfg = configured.find((c) =>
                   configuredIdsEqual(c.configured_sensor_id, p.configured_sensor_id)
@@ -2131,19 +2332,17 @@ export default function App() {
                 const maxTh = toFiniteNumber(cfg?.max_threshold ?? p.max_threshold);
                 const mult = toFiniteNumber(cfg?.multiplier ?? p.multiplier);
                 const key = sparkKey(p.device_id, p.sensor_input_label, p.sensor_source || 'input');
-                const latest = dashboardValues[key];
-                const rawVal = toFiniteNumber(latest?.value);
-                const val = scaleValue(rawVal, mult);
+                const data = scaleSparkSeries(sparklineData[key], mult);
+                const val = resolveLiveDisplayValue(data, dashboardValues[key]?.value, mult);
                 const status = thresholdStatus(val, minTh, maxTh);
-                const stroke =
-                  status === 'ok' ? '#22c55e' : status === 'alarm' ? '#ef4444' : '#0ea5e9';
-                const rawData = sparklineData[key] || [];
-                const data = rawData.map((d) => ({ ...d, value: scaleValue(toFiniteNumber(d.value), mult) }));
+                const stroke = strokeForThresholdStatus(status);
+                const objectLabel = cfg?.object_label || p.object_label;
+                const sensorLabel = cfg?.sensor_label_custom || p.sensor_label_custom;
                 return (
                   <div
                     key={p.dashboard_plane_id}
-                    className="dashboard-plane"
-                    data-ok={status === 'neutral' ? undefined : status === 'ok'}
+                    className={`dashboard-plane${inGroup ? ' dashboard-plane-in-group' : ''}`}
+                    data-ok={dataOkAttr(status)}
                     role="button"
                     tabIndex={0}
                     onClick={() => setHistoryPlane(p)}
@@ -2184,8 +2383,8 @@ export default function App() {
                       </button>
                     </div>
                     <div className="plane-header">
-                      <span className="obj-label">{p.object_label}</span>
-                      <span className="sensor-label">{p.sensor_label_custom}</span>
+                      <span className="obj-label">{objectLabel}</span>
+                      <span className="sensor-label">{sensorLabel}</span>
                     </div>
                     <div className="plane-value">
                       {val != null ? val.toLocaleString(undefined, { maximumFractionDigits: 4 }) : '—'}
@@ -2211,13 +2410,23 @@ export default function App() {
                 <>
                   {Object.entries(grouped).map(([groupId, planes]) => {
                     const group = dashboardGroups[groupId];
+                    const count = planes.length;
+                    const frameStatus = groupFrameStatus(planes.map(planeStatus));
                     return (
-                      <div key={groupId} className="dashboard-group">
+                      <div
+                        key={groupId}
+                        className="dashboard-group"
+                        data-status={frameStatus}
+                        data-count={count}
+                      >
                         <div className="dashboard-group-header">
                           <span className="dashboard-group-title">{group?.label ?? 'Group'}</span>
+                          <span className="dashboard-group-meta" title={`${count} widget${count === 1 ? '' : 's'} in this group`}>
+                            {count}
+                          </span>
                         </div>
                         <div className="dashboard-group-grid">
-                          {planes.map((p) => renderPlane(p))}
+                          {planes.map((p) => renderPlane(p, true))}
                         </div>
                       </div>
                     );

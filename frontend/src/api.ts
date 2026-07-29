@@ -141,9 +141,9 @@ export async function getSensorsForObject(objectId: number, search?: string, inc
 }
 
 export async function getConfiguredSensors() {
-  const r = await fetch(`${API_BASE}/api/configured-sensors`, { headers: headers() });
-  if (!r.ok) throw new Error(await r.text());
-  return r.json();
+  const url = `${API_BASE}/api/configured-sensors`;
+  const r = await fetch(url, { headers: headers() });
+  return readApiJson(r, url, 'GET');
 }
 
 export type ApiDebugInfo = {
@@ -163,6 +163,36 @@ export class ApiError extends Error {
     this.name = 'ApiError';
     this.debug = debug;
   }
+}
+
+async function readApiJson(
+  r: Response,
+  url: string,
+  method: string,
+  requestBody?: unknown
+): Promise<unknown> {
+  const responseBody = await r.text();
+  if (!r.ok) {
+    let errorMessage = responseBody;
+    try {
+      const j = JSON.parse(responseBody);
+      const detail = j.detail;
+      errorMessage = typeof detail === 'string' ? detail : JSON.stringify(detail);
+    } catch {
+      // use raw responseBody
+    }
+    throw new ApiError(errorMessage || r.statusText || `HTTP ${r.status}`, {
+      url,
+      method,
+      requestBody,
+      status: r.status,
+      statusText: r.statusText,
+      responseBody,
+      errorMessage,
+    });
+  }
+  if (!responseBody) return {};
+  return JSON.parse(responseBody);
 }
 
 export type SparklineHours = 1 | 2 | 4 | 8;
@@ -185,27 +215,7 @@ export async function addConfiguredSensor(body: {
     headers: headers(),
     body: JSON.stringify(body),
   });
-  const responseBody = await r.text();
-  if (!r.ok) {
-    let errorMessage = responseBody;
-    try {
-      const j = JSON.parse(responseBody);
-      const detail = j.detail;
-      errorMessage = typeof detail === 'string' ? detail : JSON.stringify(detail);
-    } catch {
-      // use raw responseBody
-    }
-    throw new ApiError(errorMessage, {
-      url,
-      method: 'POST',
-      requestBody: body,
-      status: r.status,
-      statusText: r.statusText,
-      responseBody,
-      errorMessage,
-    });
-  }
-  return JSON.parse(responseBody);
+  return readApiJson(r, url, 'POST', body);
 }
 
 export async function updateConfiguredSensor(id: number, body: { sensor_label_custom?: string; min_threshold?: number | null; max_threshold?: number | null; multiplier?: number | null; sparkline_hours?: SparklineHours }) {
@@ -215,33 +225,13 @@ export async function updateConfiguredSensor(id: number, body: { sensor_label_cu
     headers: headers(),
     body: JSON.stringify(body),
   });
-  const responseBody = await r.text();
-  if (!r.ok) {
-    let errorMessage = responseBody;
-    try {
-      const j = JSON.parse(responseBody);
-      const detail = j.detail;
-      errorMessage = typeof detail === 'string' ? detail : JSON.stringify(detail);
-    } catch {
-      // use raw responseBody
-    }
-    throw new ApiError(errorMessage, {
-      url,
-      method: 'PATCH',
-      requestBody: body,
-      status: r.status,
-      statusText: r.statusText,
-      responseBody,
-      errorMessage,
-    });
-  }
-  return JSON.parse(responseBody);
+  return readApiJson(r, url, 'PATCH', body);
 }
 
 export async function deleteConfiguredSensor(id: number) {
-  const r = await fetch(`${API_BASE}/api/configured-sensors/${id}`, { method: 'DELETE', headers: headers() });
-  if (!r.ok) throw new Error(await r.text());
-  return r.json();
+  const url = `${API_BASE}/api/configured-sensors/${id}`;
+  const r = await fetch(url, { method: 'DELETE', headers: headers() });
+  return readApiJson(r, url, 'DELETE');
 }
 
 export type SparklinePair = { device_id: number; sensor_input_label: string; sensor_source?: 'input' | 'state' | 'tracking'; hours?: SparklineHours };
@@ -324,33 +314,35 @@ export async function getMapPositions(deviceIds: number[]): Promise<{
 }
 
 export async function getDashboardPlanes() {
-  const r = await fetch(`${API_BASE}/api/dashboard-planes`, { headers: headers() });
-  if (!r.ok) throw new Error(await r.text());
-  return r.json();
+  const url = `${API_BASE}/api/dashboard-planes`;
+  const r = await fetch(url, { headers: headers() });
+  return readApiJson(r, url, 'GET');
 }
 
 export async function addDashboardPlane(configured_sensor_id: number, position_index?: number) {
-  const r = await fetch(`${API_BASE}/api/dashboard-planes`, {
+  const url = `${API_BASE}/api/dashboard-planes`;
+  const body = { configured_sensor_id, position_index: position_index ?? 0 };
+  const r = await fetch(url, {
     method: 'POST',
     headers: headers(),
-    body: JSON.stringify({ configured_sensor_id, position_index: position_index ?? 0 }),
+    body: JSON.stringify(body),
   });
-  if (!r.ok) throw new Error(await r.text());
-  return r.json();
+  return readApiJson(r, url, 'POST', body);
 }
 
 export async function removeDashboardPlane(dashboard_plane_id: number) {
-  const r = await fetch(`${API_BASE}/api/dashboard-planes/${dashboard_plane_id}`, { method: 'DELETE', headers: headers() });
-  if (!r.ok) throw new Error(await r.text());
-  return r.json();
+  const url = `${API_BASE}/api/dashboard-planes/${dashboard_plane_id}`;
+  const r = await fetch(url, { method: 'DELETE', headers: headers() });
+  return readApiJson(r, url, 'DELETE');
 }
 
 export async function reorderDashboardPlanes(order: { dashboard_plane_id: number; position_index: number }[]) {
-  const r = await fetch(`${API_BASE}/api/dashboard-planes/order`, {
+  const url = `${API_BASE}/api/dashboard-planes/order`;
+  const body = { order };
+  const r = await fetch(url, {
     method: 'PATCH',
     headers: headers(),
-    body: JSON.stringify({ order }),
+    body: JSON.stringify(body),
   });
-  if (!r.ok) throw new Error(await r.text());
-  return r.json();
+  return readApiJson(r, url, 'PATCH', body);
 }

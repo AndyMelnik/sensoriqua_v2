@@ -1290,6 +1290,12 @@ def delete_configured_sensor(
     is_active_val = 0 if use_sqlite else False
     with get_app_state_conn(dsn, override_dsn=ctx.app_state_dsn) as conn:
         cfg = app_state_table("configured_sensors")
+        dp = app_state_table("dashboard_planes")
+        # Remove dashboard widgets for this sensor so soft-deleted rows do not leave orphans.
+        conn.execute(
+            f"DELETE FROM {dp} WHERE configured_sensor_id = %s AND user_id = %s",
+            (configured_sensor_id, uid),
+        )
         cur = conn.execute(
             f"UPDATE {cfg} SET is_active = %s, updated_at = {updated_at} WHERE configured_sensor_id = %s AND user_id = %s",
             (is_active_val, configured_sensor_id, uid),
@@ -1629,7 +1635,8 @@ def add_dashboard_plane(
 ):
     uid = ctx.user_id
     dsn = ctx.dsn
-    is_active = "1" if app_state_uses_sqlite() else "true"
+    use_sqlite = ctx.app_state_dsn is None and app_state_uses_sqlite()
+    is_active = "1" if use_sqlite else "true"
     with get_app_state_conn(dsn, override_dsn=ctx.app_state_dsn) as conn:
         dp = app_state_table("dashboard_planes")
         cfg = app_state_table("configured_sensors")

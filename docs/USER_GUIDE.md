@@ -46,16 +46,19 @@ The application has three main tabs:
 ### Configured sensors (center)
 
 - Each card shows: object label, sensor label, **interactive sparkline** (hover for time/value; min/max row under the chart), and actions.
+- **Search** — Filter the list by **object name**, display label, or sensor input. The meta line shows **Showing X of Y**.
+- Card **border and sparkline color** match the dashboard: **green** in range, **red** out of range, **neutral** when thresholds are unset or there is no live reading. Live status uses the same **latest value** as dashboard panels (shared refresh interval).
 - **Edit** — Change label, MIN/MAX, multiplier, or mini-chart period; click **Save** to persist (API or browser storage). The card and dashboard panels update with the new thresholds and mini-chart period.
 - **Add to dashboard** — Add this sensor to the dashboard (right side).
-- **Remove** — Remove from the configured list (you can add it again later from Step 3).
+- **Remove** — Remove from the configured list (and from the dashboard if it was placed there). You can add it again later from Step 3.
 
-If the backend cannot save (e.g. app state DB unavailable), the app switches to **browser storage**; the tagline will show **"Saved in this browser"**.
+If the backend cannot save (e.g. app state DB unavailable), the app switches to **browser storage**; the tagline will show **"Saved in this browser"**. An empty list from the server is kept empty (old browser cache is not restored as if it were still configured).
 
 ### Dashboard (right)
 
-- Each panel shows: object label, sensor label, **latest value**, **timestamp**, and a **144px** sparkline (min/max under the chart; the large value in the panel header is the current reading).
-  - **Green** = value within MIN/MAX; **red** = outside range.
+- Each panel shows: object label, sensor label, **latest value**, and a fixed-size sparkline (min/max under the chart).
+  - **Green** = value within MIN/MAX; **red** = outside range; **neutral** = no thresholds or no reading.
+- **Configured list and dashboard stay synchronized** — same sparkline series, same live reading, same multiplier and thresholds. Both refresh together when you change **Update every**.
 - **Expand** — Dashboard fills the window (hides header and side panels). **Collapse** to return.
 - **Update every** — Choose 30 sec, 1 min, or 5 min.
 - **Click a panel** — Opens an interactive **history chart** (1, 4, 12, or 24 hours): move the cursor over the graph for crosshair lines, value and time tooltip, min/max/latest stats, and a legend for the sensor line plus MIN/MAX thresholds (green = in range).
@@ -63,8 +66,10 @@ If the backend cannot save (e.g. app state DB unavailable), the app switches to 
 
 #### Grouping panels
 
-- **+** (top-left of a panel) — Open the group dialog. Enter a **group label** (e.g. "Engine", "Fuel"). Panels with the same label are shown inside a framed section with that title.
-- **−** (top-left) — Remove the panel from its group (no label).
+- **+** (top-left of a panel) — Open the group dialog. Enter a **group label** (e.g. "Engine", "Cold store A"). Panels with the same label sit inside a **framed section** sized to those widgets (not stretched full width).
+- **−** (top-left) — Remove the panel from its group.
+- On a narrow viewport, **groups and individual widgets wrap to the next row** instead of shrinking and clipping labels or sparklines.
+- The group frame color follows member status (red if any panel is in alarm, green if all are OK).
 - Group membership and labels are stored **locally** (and in exported JSON). They are restored on next load and when you import a dashboard.
 
 ### Export and Import (header)
@@ -181,10 +186,13 @@ Pick the dimension to start from:
 
 - **No data in report** — Try a shorter or different timeframe, or use **Try last 24 hours** if the app suggests it.
 - **Editing configured sensors** — Use **Edit** on the card or **Configure / Edit** in Step 3 for the same sensor; both save MIN/MAX, multiplier, and mini-chart period.
+- **Search configured list** — Type an object or room/machine name to narrow a long Configured sensors list.
 - **Mini-chart period** — Use 2–8 hours on noisy or slow-changing sensors so the sparkline is easier to read.
-- **Dashboard groups** — Use short, clear labels (e.g. "Engine", "Safety") so framed sections stay readable.
+- **Dashboard groups** — Use short, clear labels (e.g. "Engine", "Cold store A") so framed sections stay readable; widgets keep a fixed size and wrap on small screens.
+- **Threshold sync** — Edit MIN/MAX once on a configured sensor; both the center card and dashboard panel borders/sparklines update on the next refresh.
 - **Dashboard Export/Import** — Export after arranging panels and groups; sensors must exist in the configured list or be resolvable by device/sensor.
 - **Report Export/Import** — Export config (and optionally generated data) to reopen the same report without re-fetching.
 - **Map conditions** — Add conditions only when you need to narrow units; leave Step 3 empty to show all units in scope.
+- **Industry examples** — See **Use cases** in the [README](../README.md#use-cases) (heavy machinery, warehouse climate, and more).
 
 For configuration and deployment, see [CONFIGURATION.md](CONFIGURATION.md). For the API, see [API_OVERVIEW.md](API_OVERVIEW.md).

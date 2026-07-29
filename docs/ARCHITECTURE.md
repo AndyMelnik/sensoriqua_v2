@@ -45,8 +45,8 @@ Schema names and table names used in SQL are fixed or derived from `app_state_ta
 
 ## Frontend layout
 
-- **`App.tsx`** — Root component: tabs (**Dashboards** / **Reports** / **Map**), left panel workflows, configured sensors (configure/edit/upsert by sensor identity), dashboard grid (with grouping), report chart and tables, modals (config, group, export, confirm, history, debug).
-- **`api.ts`** — API client: DSN, auth token, localStorage for configured sensors, dashboard planes, dashboard groups and assignments; all `/api/*` calls.
+- **`App.tsx`** — Root component: tabs (**Dashboards** / **Reports** / **Map**), left panel workflows, configured sensors (search, configure/edit/upsert by sensor identity, threshold-colored cards), dashboard flex grid (fixed-size widgets, wrap on resize, framed groups), shared telemetry refresh (sparklines + latest values), report chart and tables, modals (config, group, export, confirm, history, debug).
+- **`api.ts`** — API client: DSN, auth token, localStorage for configured sensors, dashboard planes, dashboard groups and assignments; structured `ApiError` for app-state calls; all `/api/*` calls.
 - **`MapTab.tsx`** — Map tab: entity filter, object scope, telemetry conditions, `POST /api/map-positions`, table + map.
 - **`UnitsMap.tsx`** / **`MapUnitsTable.tsx`** — Leaflet map and sortable/filterable units table with XLSX export.
 - **`ReportChart.tsx`** — Multi-series graph: zoom (drag), reset, legend toggles, tooltip, segments (no drop to zero on missing values).

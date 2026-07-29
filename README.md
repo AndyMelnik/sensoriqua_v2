@@ -85,23 +85,27 @@ Build a live monitoring board from telematics sensors (inputs, states, and track
 2. **Choose objects** — flat list or grouped by group/tag; search by label.
 3. **Pick sensors** per object, then **Configure / Add** (or **Configure / Edit**):
    - Custom **display label**
-   - Optional **MIN / MAX** thresholds (drive green/red panel coloring)
+   - Optional **MIN / MAX** thresholds (drive green/red panel and card coloring)
    - **Multiplier** to scale displayed values
    - **Mini-chart period** — last **1 / 2 / 4 / 8 hours** for sparklines
 
 **Configured list (center)**
 
 - Cards with interactive sparklines (hover for time/value; min/max stats).
+- **Search** by object name, display label, or sensor input (with “Showing X of Y”).
+- Card **border and sparkline** use the same threshold logic as the dashboard (**green** in range, **red** out of range, **neutral** otherwise).
 - **Edit**, **Add to dashboard**, **Remove**.
-- If app-state DB is unavailable, the UI falls back to **browser localStorage** (“Saved in this browser”) while live values still come from the API.
+- Removing a configured sensor also clears its dashboard widgets.
+- If app-state DB is unavailable, the UI falls back to **browser localStorage** (“Saved in this browser”) while live values still come from the API. An empty server list is treated as empty (stale local cache is not revived).
 
 **Live dashboard (right)**
 
-- Panels show object/sensor labels, **latest value**, and a **144px** sparkline.
+- Panels show object/sensor labels, **latest value**, and a fixed-size sparkline.
+- **Configured sensors and dashboard widgets stay in sync**: shared sparkline series, shared live reading (`latest-values`, with sparkline as fallback), same multiplier and MIN/MAX.
 - Border/sparkline color: **green** inside thresholds, **red** outside, **neutral** when no thresholds or no reading.
-- **Expand / Collapse** full-window mode; refresh every **30s / 1m / 5m**.
+- **Expand / Collapse** full-window mode; refresh every **30s / 1m / 5m** (sparklines and latest values together).
 - **Click a panel** → interactive **history chart** (1–24h) with crosshair, tooltip, and threshold legend.
-- **Group panels** with **+ / −** (named sections); grouping is kept in export JSON.
+- **Group panels** with **+ / −** (named framed sections). The group frame wraps only its widgets, keeps standard widget size, and wraps to the next row when the viewport is narrow. Group status follows member thresholds (alarm if any panel is out of range).
 - **Export / Import** dashboard layout as JSON (planes + groups).
 
 ### Reports
@@ -134,9 +138,48 @@ Step-by-step usage: **[docs/USER_GUIDE.md](docs/USER_GUIDE.md)**.
 - **Standalone:** Backend uses `SENSORIQUA_DSN` from `.env`. Client `X-Sensoriqua-DSN` / `?user_id=` are **disabled by default** (set `ALLOW_CLIENT_DSN` / `ALLOW_CLIENT_USER_ID` only for local debugging).
 - **Navixy App Connect:** Set `JWT_SECRET` (min 32 chars). Optionally set `LOGIN_API_KEY` and `CORS_ORIGINS`. Middleware calls `POST /api/auth/login`; the app returns a JWT and uses **iotDbUrl** / **userDbUrl** per user. All other `/api/*` routes require `Authorization: Bearer <token>`. See [docs/NAVIXY_APP_CONNECT.md](docs/NAVIXY_APP_CONNECT.md).
 
+## Use cases
+
+Sensoriqua 2 fits any Navixy / telematics objects that publish **inputs**, **states**, or **tracking** fields. Typical boards:
+
+### Heavy machinery and construction fleet
+
+Monitor excavators, loaders, dozers, cranes, or generators on one live board.
+
+| What to watch | Example sensors | Suggested thresholds / groups |
+|---------------|-----------------|-------------------------------|
+| Utilization & motion | `speed`, ignition / work-mode **state** | Group “Motion”; alarm when moving outside shift hours |
+| Powertrain health | Engine coolant temp, oil pressure, RPM | MIN/MAX on temp and pressure; group “Engine” |
+| Fuel & fluids | Fuel level, AdBlue | Low-fuel MAX/MIN; group “Consumables” |
+| Load / productivity | Payload, dig cycles, engine hours | Reports for shift summaries; Map for site location |
+| Safety | Seat belt, overload, tip-over angle | Red border when out of range; history click for incident window |
+
+**Workflow:** filter machines by site **Group** or **Tag** → configure the sensors above → **Add to dashboard** → group panels (Engine / Fuel / Safety) → set **Update every** to 30s–1m on active sites → export the layout for other supervisors.
+
+### Warehouse and cold-room climate
+
+Watch rooms, zones, or fridges that report temperature and humidity (and optional door/open state).
+
+| What to watch | Example sensors | Suggested thresholds / groups |
+|---------------|-----------------|-------------------------------|
+| Ambient climate | Temperature, humidity | e.g. cold room 2–8 °C, humidity 40–70%; group by room name |
+| Door / access | Door open **state**, entry count | Alarm when door open too long; pair with temp spike in history |
+| Equipment | Compressor running, defrost cycle | Neutral until thresholds set; Reports for daily Min/Max/Avg |
+| Multi-zone sites | One object per room or zone | **Search** in Configured sensors by room label; Map if rooms have GPS/trackers |
+
+**Workflow:** configure temp + humidity per room with shared MIN/MAX → put both panels in a group labeled “Cold store A” → green/red frames show compliance at a glance → use **Reports** for HACCP-style daily Min/Max/Avg tables (XLSX/PDF).
+
+### Other examples
+
+- **Utility / genset yards** — voltage, frequency, fuel, runtime hours.
+- **Agriculture** — soil moisture, grain bin temperature, irrigation pump state.
+- **Municipal fleet** — speed, idle time, PTO state, with Map + condition filters.
+
+In all cases the same pattern applies: **thresholds for at-a-glance status**, **groups for visual zones**, **search** to find objects quickly in a long configured list, and **Reports/Map** when you need history or location.
 ## Documentation
 
 - **[docs/USER_GUIDE.md](docs/USER_GUIDE.md)** — How to use Dashboards, Reports, and Map.
+- **[README — Use cases](#use-cases)** — Heavy machinery, warehouse climate, and related examples.
 - **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** — Stack, data flow, backend/frontend layout.
 - **[docs/CONFIGURATION.md](docs/CONFIGURATION.md)** — Environment variables, CORS, app state, production checklist.
 - **[docs/API_OVERVIEW.md](docs/API_OVERVIEW.md)** — API endpoints and dashboard JSON format.
