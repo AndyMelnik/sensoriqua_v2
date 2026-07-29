@@ -2,6 +2,9 @@
  * Sensoriqua API client.
  * Sends Authorization: Bearer <token> when auth_token is in localStorage (Navixy App Connect).
  * X-Sensoriqua-DSN is sent only when VITE_ALLOW_CLIENT_DSN=1 (must also set ALLOW_CLIENT_DSN on backend).
+ *
+ * App-state localStorage (configured sensors, dashboard, groups) is scoped by JWT userId so
+ * different Navixy clients never share another user's board in the same browser.
  */
 const API_BASE = import.meta.env.VITE_API_URL || '';
 const ALLOW_CLIENT_DSN =
@@ -15,57 +18,129 @@ const LOCAL_CONFIGURED_KEY = 'sensoriqua_configured';
 const LOCAL_DASHBOARD_KEY = 'sensoriqua_dashboard';
 const LOCAL_DASHBOARD_GROUPS_KEY = 'sensoriqua_dashboard_groups';
 const LOCAL_DASHBOARD_ASSIGN_KEY = 'sensoriqua_dashboard_group_assign';
+const LOCAL_APP_STATE_KEYS = [
+  LOCAL_CONFIGURED_KEY,
+  LOCAL_DASHBOARD_KEY,
+  LOCAL_DASHBOARD_GROUPS_KEY,
+  LOCAL_DASHBOARD_ASSIGN_KEY,
+] as const;
+
+export function getAuthToken(): string {
+  return localStorage.getItem(AUTH_TOKEN_KEY) || '';
+}
+
+/** Decode JWT payload (no verify — middleware already issued the token). */
+function readJwtPayload(token: string): Record<string, unknown> | null {
+  try {
+    const parts = token.split('.');
+    if (parts.length < 2) return null;
+    const b64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    const padded = b64 + '='.repeat((4 - (b64.length % 4)) % 4);
+    return JSON.parse(atob(padded)) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Stable scope for local app-state keys.
+ * Prefer Navixy userId from JWT; fall back to anon for standalone (no token).
+ */
+export function getSessionScope(): string {
+  const token = getAuthToken();
+  if (!token) return 'anon';
+  const payload = readJwtPayload(token);
+  const userId = payload?.userId ?? payload?.sub;
+  if (userId != null && String(userId).trim() !== '') {
+    return `u:${String(userId)}`;
+  }
+  // Token present but no userId — still isolate from anon / other tokens
+  return `t:${token.slice(-24)}`;
+}
+
+function scopedStorageKey(base: string, scope = getSessionScope()): string {
+  return `${base}::${scope}`;
+}
+
+function readScopedJson(base: string, fallbackWhenMissing: unknown): unknown {
+  const scope = getSessionScope();
+  try {
+    const scopedRaw = localStorage.getItem(scopedStorageKey(base, scope));
+    if (scopedRaw != null) return JSON.parse(scopedRaw);
+    // Legacy unscoped keys: only reuse for anonymous standalone — never for a JWT user
+    // (avoids showing another client's dashboard after App Connect login).
+    if (scope === 'anon') {
+      const legacy = localStorage.getItem(base);
+      if (legacy != null) {
+        const parsed = JSON.parse(legacy);
+        localStorage.setItem(scopedStorageKey(base, scope), legacy);
+        localStorage.removeItem(base);
+        return parsed;
+      }
+    }
+  } catch {
+    // ignore corrupt storage
+  }
+  return fallbackWhenMissing;
+}
+
+function writeScopedJson(base: string, value: unknown): void {
+  localStorage.setItem(scopedStorageKey(base), JSON.stringify(value));
+  // Drop legacy unscoped key so it cannot leak across users
+  localStorage.removeItem(base);
+}
+
+/** Clear app-state cache for the current session scope (not the auth token). */
+export function clearCurrentSessionAppState(): void {
+  const scope = getSessionScope();
+  for (const base of LOCAL_APP_STATE_KEYS) {
+    localStorage.removeItem(scopedStorageKey(base, scope));
+    if (scope === 'anon') localStorage.removeItem(base);
+  }
+}
+
+/** Remove legacy unscoped keys so they cannot leak into a JWT session. */
+export function scrubLegacyUnscopedAppState(): void {
+  if (getSessionScope() === 'anon') return;
+  for (const base of LOCAL_APP_STATE_KEYS) {
+    localStorage.removeItem(base);
+  }
+}
 
 export function getLocalConfiguredSensors(): unknown[] {
-  try {
-    const raw = localStorage.getItem(LOCAL_CONFIGURED_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
-  }
+  const v = readScopedJson(LOCAL_CONFIGURED_KEY, []);
+  return Array.isArray(v) ? v : [];
 }
 
 export function setLocalConfiguredSensors(list: unknown[]): void {
-  localStorage.setItem(LOCAL_CONFIGURED_KEY, JSON.stringify(list));
+  writeScopedJson(LOCAL_CONFIGURED_KEY, list);
 }
 
 export function getLocalDashboardPlanes(): unknown[] {
-  try {
-    const raw = localStorage.getItem(LOCAL_DASHBOARD_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
-  }
+  const v = readScopedJson(LOCAL_DASHBOARD_KEY, []);
+  return Array.isArray(v) ? v : [];
 }
 
 export function setLocalDashboardPlanes(list: unknown[]): void {
-  localStorage.setItem(LOCAL_DASHBOARD_KEY, JSON.stringify(list));
+  writeScopedJson(LOCAL_DASHBOARD_KEY, list);
 }
 
 export function getLocalDashboardGroups(): unknown {
-  try {
-    const raw = localStorage.getItem(LOCAL_DASHBOARD_GROUPS_KEY);
-    return raw ? JSON.parse(raw) : {};
-  } catch {
-    return {};
-  }
+  const v = readScopedJson(LOCAL_DASHBOARD_GROUPS_KEY, {});
+  return v && typeof v === 'object' && !Array.isArray(v) ? v : {};
 }
 
 export function setLocalDashboardGroups(groups: unknown): void {
-  localStorage.setItem(LOCAL_DASHBOARD_GROUPS_KEY, JSON.stringify(groups));
+  writeScopedJson(LOCAL_DASHBOARD_GROUPS_KEY, groups);
 }
 
 export function getLocalDashboardAssignments(): unknown {
-  try {
-    const raw = localStorage.getItem(LOCAL_DASHBOARD_ASSIGN_KEY);
-    return raw ? JSON.parse(raw) : {};
-  } catch {
-    return {};
-  }
+  const v = readScopedJson(LOCAL_DASHBOARD_ASSIGN_KEY, {});
+  return v && typeof v === 'object' && !Array.isArray(v) ? v : {};
 }
 
 export function setLocalDashboardAssignments(assignments: unknown): void {
-  localStorage.setItem(LOCAL_DASHBOARD_ASSIGN_KEY, JSON.stringify(assignments));
+  writeScopedJson(LOCAL_DASHBOARD_ASSIGN_KEY, assignments);
 }
 
 export function getDsn(): string {
@@ -75,10 +150,6 @@ export function getDsn(): string {
 export function setDsn(dsn: string): void {
   if (dsn) localStorage.setItem('sensoriqua_dsn', dsn);
   else localStorage.removeItem('sensoriqua_dsn');
-}
-
-export function getAuthToken(): string {
-  return localStorage.getItem(AUTH_TOKEN_KEY) || '';
 }
 
 function headers(dsn?: string): HeadersInit {

@@ -53,8 +53,9 @@ The frontend sends `Authorization: Bearer <token>` when `localStorage.auth_token
 - **Data source:** All telematics and business data come from the **iotDbUrl** (and app state from **userDbUrl**) supplied by the Navixy auth service at login. The app does not use a shared default DSN or `X-Sensoriqua-DSN` for API requests when App Connect is enabled.
 - **Per-user credentials:** Credentials are stored server-side keyed only by the user ID from the JWT. Each request uses the DSN for that token’s user; there is no cross-user use of credentials.
 - **Require auth when JWT_SECRET is set:** When `JWT_SECRET` is set, every `/api/*` route except **POST /api/auth/login** requires a valid Bearer token. Requests without a valid token receive 401. So different browser sessions (different users, or the same user in different browsers) are isolated: each session has its own token and thus its own iotDbUrl/userDbUrl.
+- **Browser localStorage:** Configured sensors, dashboard planes, and group layout are stored under keys **scoped by JWT `userId`**. Switching Navixy users in the same browser does not show another client’s board. Legacy unscoped keys are ignored for authenticated sessions.
 - **IoT/telematics data:** Read from `iotDbUrl` (per user).
-- **App state** (configured sensors, dashboard planes): Stored in `userDbUrl` when using App Connect, so each user has their own data in their Navixy user database. The app uses the `app_sensoriqua` schema there; ensure migrations are applied to each user DB if required. If the app-state backend is unavailable (e.g. 503), the frontend can fall back to localStorage for that session and shows “Saved in this browser.”
+- **App state** (configured sensors, dashboard planes): Prefer **userDbUrl** (per Navixy user DB) so each client has isolated server-side state. If `SENSORIQUA_APP_STATE_DSN` points at a shared SQLite file, rows are still filtered by a stable per-user integer id derived from the JWT. If the app-state backend is unavailable (e.g. 503), the frontend can fall back to **session-scoped** localStorage and shows “Saved in this browser.”
 
 ## Optional: Basic Auth for static assets
 

@@ -91,6 +91,18 @@ def _use_sqlite_app_state() -> bool:
     return lower.startswith("sqlite:") or lower.startswith("file:")
 
 
+def request_uses_sqlite_app_state(override_dsn: str | None) -> bool:
+    """
+    Whether app-state for this request is SQLite — must match get_app_state_conn().
+    Env SENSORIQUA_APP_STATE_DSN=sqlite://... overrides Navixy userDbUrl.
+    """
+    if _use_sqlite_app_state():
+        return True
+    if override_dsn:
+        return False
+    return True
+
+
 def _sqlite_path() -> Path | None:
     if not _use_sqlite_app_state():
         return None
@@ -217,11 +229,12 @@ def _open_sqlite_app_state(path: Path) -> _SqliteConnWrapper:
 
 def _app_state_schema_for_conn(override_dsn: str | None) -> str:
     """Return 'sqlite' or 'postgres' so app_state_table() resolves correctly before opening conn."""
-    if override_dsn:
-        return "postgres"
+    # Env sqlite must win over Navixy userDbUrl — same order as get_app_state_conn().
     if _use_sqlite_app_state():
         return "sqlite"
-    return "sqlite"  # default: no APP_STATE_DSN -> use default SQLite
+    if override_dsn:
+        return "postgres"
+    return "sqlite"
 
 
 @contextmanager
@@ -261,7 +274,7 @@ def get_app_state_conn(main_dsn: str, override_dsn: str | None = None) -> Genera
 
 
 def app_state_uses_sqlite() -> bool:
-    """True if app state is stored in SQLite (so table names have no schema prefix)."""
+    """True if env forces SQLite or no APP_STATE_DSN (default local SQLite file)."""
     return _use_sqlite_app_state() or not APP_STATE_DSN
 
 

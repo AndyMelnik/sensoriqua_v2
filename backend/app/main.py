@@ -43,8 +43,8 @@ from .db import (
     DEFAULT_DSN,
     get_conn,
     get_app_state_conn,
-    app_state_uses_sqlite,
     app_state_table,
+    request_uses_sqlite_app_state,
 )
 from .dsn_security import UnsafeDsnError, validate_dsn
 
@@ -1014,7 +1014,7 @@ def _fetch_configured_sensor_row(
 def list_configured_sensors(ctx: RequestContext = Depends(_request_context)):
     uid = ctx.user_id
     dsn = ctx.dsn
-    use_sqlite = ctx.app_state_dsn is None and app_state_uses_sqlite()
+    use_sqlite = request_uses_sqlite_app_state(ctx.app_state_dsn)
     try:
         with get_app_state_conn(dsn, override_dsn=ctx.app_state_dsn) as conn:
             cfg = app_state_table("configured_sensors")
@@ -1107,7 +1107,7 @@ def add_configured_sensor(
     source = (body.sensor_source or "input").strip().lower()
     if source not in ("input", "state", "tracking"):
         source = "input"
-    use_sqlite = ctx.app_state_dsn is None and app_state_uses_sqlite()
+    use_sqlite = request_uses_sqlite_app_state(ctx.app_state_dsn)
     try:
         with get_app_state_conn(dsn, override_dsn=ctx.app_state_dsn) as conn:
             cfg = app_state_table("configured_sensors")
@@ -1224,7 +1224,7 @@ def update_configured_sensor(
     if body.sparkline_hours is not None and body.sparkline_hours not in SPARKLINE_HOURS_ALLOWED:
         raise HTTPException(400, "sparkline_hours must be 1, 2, 4, or 8")
     dsn = ctx.dsn
-    use_sqlite = ctx.app_state_dsn is None and app_state_uses_sqlite()
+    use_sqlite = request_uses_sqlite_app_state(ctx.app_state_dsn)
     updated_at = "datetime('now')" if use_sqlite else "now()"
     with get_app_state_conn(dsn, override_dsn=ctx.app_state_dsn) as conn:
         cfg = app_state_table("configured_sensors")
@@ -1285,7 +1285,7 @@ def delete_configured_sensor(
 ):
     uid = ctx.user_id
     dsn = ctx.dsn
-    use_sqlite = ctx.app_state_dsn is None and app_state_uses_sqlite()
+    use_sqlite = request_uses_sqlite_app_state(ctx.app_state_dsn)
     updated_at = "datetime('now')" if use_sqlite else "now()"
     is_active_val = 0 if use_sqlite else False
     with get_app_state_conn(dsn, override_dsn=ctx.app_state_dsn) as conn:
@@ -1558,7 +1558,7 @@ def sensor_history(
 def list_dashboard_planes(ctx: RequestContext = Depends(_request_context)):
     uid = ctx.user_id
     dsn = ctx.dsn
-    use_sqlite = ctx.app_state_dsn is None and app_state_uses_sqlite()
+    use_sqlite = request_uses_sqlite_app_state(ctx.app_state_dsn)
     is_active = "1" if use_sqlite else "true"
     try:
         with get_app_state_conn(dsn, override_dsn=ctx.app_state_dsn) as conn:
@@ -1635,7 +1635,7 @@ def add_dashboard_plane(
 ):
     uid = ctx.user_id
     dsn = ctx.dsn
-    use_sqlite = ctx.app_state_dsn is None and app_state_uses_sqlite()
+    use_sqlite = request_uses_sqlite_app_state(ctx.app_state_dsn)
     is_active = "1" if use_sqlite else "true"
     with get_app_state_conn(dsn, override_dsn=ctx.app_state_dsn) as conn:
         dp = app_state_table("dashboard_planes")

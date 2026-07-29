@@ -74,7 +74,7 @@ The backend adds:
 ## Client-side storage (localStorage)
 
 - **Auth token:** When using Navixy, the frontend stores the JWT in `localStorage.auth_token` and sends it in the `Authorization` header. Serve over HTTPS; consider short token expiry.
-- **Config fallback:** On 503 for app state, configured sensors / dashboard may be stored in localStorage. No secrets should be stored in those keys.
+- **Config fallback:** On 503 for app state, configured sensors / dashboard / groups may be stored in localStorage under keys **scoped by JWT `userId`** so different Navixy clients in the same browser do not share another user's board. Legacy unscoped keys are ignored for authenticated sessions. No secrets should be stored in those keys.
 
 ## Pentest / security checklist (summary)
 

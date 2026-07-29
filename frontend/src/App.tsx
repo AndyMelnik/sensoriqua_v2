@@ -350,12 +350,10 @@ export default function App() {
   const [configuredSearch, setConfiguredSearch] = useState('');
   const [sparklineData, setSparklineData] = useState<Record<string, { ts: string; value: number | null }[]>>({});
   const [dashboardPlanes, setDashboardPlanes] = useState<DashboardPlane[]>([]);
-  const [dashboardGroups, setDashboardGroups] = useState<Record<string, { id: string; label: string }>>(
-    () => (api.getLocalDashboardGroups() as Record<string, { id: string; label: string }>) || {}
-  );
-  const [dashboardAssignments, setDashboardAssignments] = useState<Record<number, string>>(
-    () => (api.getLocalDashboardAssignments() as Record<number, string>) || {}
-  );
+  // Do not hydrate groups/assignments from unscoped legacy storage — wait for session scope.
+  const [dashboardGroups, setDashboardGroups] = useState<Record<string, { id: string; label: string }>>({});
+  const [dashboardAssignments, setDashboardAssignments] = useState<Record<number, string>>({});
+  const [sessionScope, setSessionScope] = useState(() => api.getSessionScope());
   const [groupDialog, setGroupDialog] = useState<{
     plane: DashboardPlane;
     initialLabel: string;
@@ -540,6 +538,48 @@ export default function App() {
 
   const [useLocalConfig, setUseLocalConfig] = useState(false);
 
+  // Navixy may set auth_token before/after mount; switch local cache + UI when the JWT user changes.
+  useEffect(() => {
+    const applyScope = (next: string) => {
+      setSessionScope(next);
+      setUseLocalConfig(false);
+      setConfigured([]);
+      setDashboardPlanes([]);
+      setSparklineData({});
+      setDashboardValues({});
+      setHistoryPlane(null);
+      setConfiguredSearch('');
+      setDashboardGroups(
+        (api.getLocalDashboardGroups() as Record<string, { id: string; label: string }>) || {}
+      );
+      setDashboardAssignments((api.getLocalDashboardAssignments() as Record<number, string>) || {});
+    };
+
+    const check = () => {
+      const next = api.getSessionScope();
+      if (next !== sessionScope) applyScope(next);
+    };
+
+    check();
+    const id = window.setInterval(check, 1000);
+    window.addEventListener('focus', check);
+    window.addEventListener('storage', check);
+    return () => {
+      window.clearInterval(id);
+      window.removeEventListener('focus', check);
+      window.removeEventListener('storage', check);
+    };
+  }, [sessionScope]);
+
+  // Load session-scoped groups when scope is known / changes (after empty bootstrap).
+  useEffect(() => {
+    api.scrubLegacyUnscopedAppState();
+    setDashboardGroups(
+      (api.getLocalDashboardGroups() as Record<string, { id: string; label: string }>) || {}
+    );
+    setDashboardAssignments((api.getLocalDashboardAssignments() as Record<number, string>) || {});
+  }, [sessionScope]);
+
   const loadConfigured = useCallback(async () => {
     setError(null);
     if (useLocalConfig) {
@@ -549,7 +589,7 @@ export default function App() {
     }
     try {
       const list = ((await api.getConfiguredSensors()) as Record<string, unknown>[]).map(normalizeConfiguredFromApi);
-      // Empty server list is valid — never revive stale localStorage as source of truth.
+      // Empty server list is valid — never revive another session's localStorage.
       setConfigured(list);
       api.setLocalConfiguredSensors(list);
     } catch (e) {
@@ -563,7 +603,7 @@ export default function App() {
         setError(e instanceof Error ? e.message : String(e));
       }
     }
-  }, [useLocalConfig]);
+  }, [useLocalConfig, sessionScope]);
 
   const applyGroupsToPlanes = useCallback(
     (planes: DashboardPlane[]): DashboardPlane[] =>
@@ -582,7 +622,7 @@ export default function App() {
     }
     try {
       const list = ((await api.getDashboardPlanes()) as Record<string, unknown>[]).map(normalizeDashboardPlaneFromApi);
-      // Empty server list is valid — do not restore deleted widgets from localStorage.
+      // Empty server list is valid — do not restore another client's widgets from localStorage.
       setDashboardPlanes(applyGroupsToPlanes(list));
       api.setLocalDashboardPlanes(list);
     } catch (e) {
@@ -593,7 +633,7 @@ export default function App() {
         setDashboardPlanes(applyGroupsToPlanes(list));
       }
     }
-  }, [useLocalConfig, applyGroupsToPlanes]);
+  }, [useLocalConfig, applyGroupsToPlanes, sessionScope]);
 
   useEffect(() => { loadConfigured(); }, [loadConfigured]);
   useEffect(() => { loadDashboard(); }, [loadDashboard]);
@@ -952,6 +992,9 @@ export default function App() {
         await loadDashboard();
         return;
       }
+      // Close configure modal so the error / debug dialog is visible (it sits under the form overlay).
+      setConfigModal(null);
+      setEditingConfigId(null);
       const message = e instanceof Error ? e.message : String(e);
       setError(message);
       if (e instanceof api.ApiError) setDebugInfo(e.debug);
