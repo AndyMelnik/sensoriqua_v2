@@ -1034,12 +1034,19 @@ def list_configured_sensors(ctx: RequestContext = Depends(_request_context)):
                 if not rows:
                     return []
                 object_ids = list({r["object_id"] for r in rows})
-                with get_conn(dsn) as pg:
-                    cur2 = pg.execute(
-                        "SELECT object_id, object_label FROM raw_business_data.objects WHERE object_id = ANY(%s)",
-                        (object_ids,),
+                labels: dict[Any, Any] = {}
+                try:
+                    with get_conn(dsn) as pg:
+                        cur2 = pg.execute(
+                            "SELECT object_id, object_label FROM raw_business_data.objects WHERE object_id = ANY(%s)",
+                            (object_ids,),
+                        )
+                        labels = {r["object_id"]: r["object_label"] for r in cur2.fetchall()}
+                except Exception:
+                    logger.warning(
+                        "configured_sensors list: could not load object labels",
+                        exc_info=True,
                     )
-                    labels = {r["object_id"]: r["object_label"] for r in cur2.fetchall()}
                 for r in rows:
                     r["object_label"] = labels.get(r["object_id"])
                 return [dict(r) for r in rows]
@@ -1187,15 +1194,24 @@ def add_configured_sensor(
             if row is None:
                 raise HTTPException(status_code=500, detail="INSERT returned no row")
             conn.commit()
-            # Attach object_label from main DB
-            with get_conn(dsn) as pg:
-                cur2 = pg.execute(
-                    "SELECT object_label FROM raw_business_data.objects WHERE object_id = %s",
-                    (body.object_id,),
-                )
-                ob = cur2.fetchone()
             out = dict(row)
-            out["object_label"] = ob["object_label"] if ob else None
+            out["object_label"] = None
+            # Label enrichment must not fail the create (iot DB may be slow/unreachable).
+            try:
+                with get_conn(dsn) as pg:
+                    cur2 = pg.execute(
+                        "SELECT object_label FROM raw_business_data.objects WHERE object_id = %s",
+                        (body.object_id,),
+                    )
+                    ob = cur2.fetchone()
+                if ob:
+                    out["object_label"] = ob["object_label"]
+            except Exception:
+                logger.warning(
+                    "configured_sensors create: could not load object_label for object_id=%s",
+                    body.object_id,
+                    exc_info=True,
+                )
             return out
     except HTTPException:
         raise
@@ -1581,12 +1597,19 @@ def list_dashboard_planes(ctx: RequestContext = Depends(_request_context)):
                 if not rows:
                     return []
                 object_ids = list({r["object_id"] for r in rows})
-                with get_conn(dsn) as pg:
-                    cur2 = pg.execute(
-                        "SELECT object_id, object_label FROM raw_business_data.objects WHERE object_id = ANY(%s)",
-                        (object_ids,),
+                labels: dict[Any, Any] = {}
+                try:
+                    with get_conn(dsn) as pg:
+                        cur2 = pg.execute(
+                            "SELECT object_id, object_label FROM raw_business_data.objects WHERE object_id = ANY(%s)",
+                            (object_ids,),
+                        )
+                        labels = {r["object_id"]: r["object_label"] for r in cur2.fetchall()}
+                except Exception:
+                    logger.warning(
+                        "dashboard_planes list: could not load object labels",
+                        exc_info=True,
                     )
-                    labels = {r["object_id"]: r["object_label"] for r in cur2.fetchall()}
                 for r in rows:
                     r["object_label"] = labels.get(r["object_id"])
                 return [dict(r) for r in rows]

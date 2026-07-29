@@ -954,8 +954,12 @@ export default function App() {
           : prev
       );
     } catch (e) {
-      const is503 = e instanceof api.ApiError && e.debug?.status === 503;
-      if (is503) {
+      const status = e instanceof api.ApiError ? e.debug?.status : undefined;
+      const isAppStateDown =
+        status === 503 ||
+        (typeof status === 'number' && status >= 500) ||
+        (!(e instanceof api.ApiError) && e instanceof TypeError);
+      if (isAppStateDown) {
         setUseLocalConfig(true);
         const list = applyConfiguredPatch(
           (api.getLocalConfiguredSensors() as Record<string, unknown>[]).map(normalizeConfiguredFromApi)

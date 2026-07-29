@@ -40,6 +40,17 @@ DEFAULT_DSN = os.environ.get(
 # Optional: use SQLite for app state when main DB has no CREATE rights
 APP_STATE_DSN = os.environ.get("SENSORIQUA_APP_STATE_DSN", "").strip()
 
+# When 1: use Navixy userDbUrl for configured_sensors/dashboard (requires app_sensoriqua schema).
+# Default off — Render/Navixy user DBs usually lack that schema; SQLite avoids hangs/503s.
+USE_USER_DB_APP_STATE = os.environ.get("SENSORIQUA_USE_USER_DB_APP_STATE", "").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+)
+
+# Postgres connect timeout (seconds) so bad userDbUrl/iotDbUrl cannot hang API workers.
+PG_CONNECT_TIMEOUT = max(1, int(os.environ.get("SENSORIQUA_PG_CONNECT_TIMEOUT", "8")))
+
 # When no override_dsn and no APP_STATE_DSN, use this SQLite file so app works without app_sensoriqua on Postgres
 _DEFAULT_APP_STATE_PATH = Path(__file__).resolve().parent.parent / "sensoriqua_state.db"
 
@@ -91,19 +102,34 @@ def _use_sqlite_app_state() -> bool:
     return lower.startswith("sqlite:") or lower.startswith("file:")
 
 
+def _env_forces_sqlite_app_state() -> bool:
+    return _use_sqlite_app_state()
+
+
+def _should_use_navixy_user_db(override_dsn: str | None) -> bool:
+    """True only when explicitly opted in and a userDbUrl override is present."""
+    if not override_dsn or not str(override_dsn).strip():
+        return False
+    if _env_forces_sqlite_app_state():
+        return False
+    return USE_USER_DB_APP_STATE
+
+
 def request_uses_sqlite_app_state(override_dsn: str | None) -> bool:
     """
     Whether app-state for this request is SQLite — must match get_app_state_conn().
-    Env SENSORIQUA_APP_STATE_DSN=sqlite://... overrides Navixy userDbUrl.
+    Default is SQLite (shared file + per-JWT user_id). Navixy userDbUrl only when
+    SENSORIQUA_USE_USER_DB_APP_STATE=1 and SENSORIQUA_APP_STATE_DSN is not sqlite.
     """
-    if _use_sqlite_app_state():
+    if _env_forces_sqlite_app_state():
         return True
-    if override_dsn:
+    if _should_use_navixy_user_db(override_dsn):
         return False
     return True
 
 
 def _sqlite_path() -> Path | None:
+    """Path for SENSORIQUA_APP_STATE_DSN when it is a sqlite/file URL."""
     if not _use_sqlite_app_state():
         return None
     s = APP_STATE_DSN
@@ -129,7 +155,12 @@ def get_conn(dsn: str) -> Generator[psycopg.Connection, None, None]:
         safe_dsn = prepare_safe_dsn(dsn)
     except UnsafeDsnError:
         raise
-    conn = psycopg.connect(safe_dsn, row_factory=dict_row)
+    # Fail fast on unreachable hosts (e.g. bad Navixy URLs) instead of hanging workers.
+    conn = psycopg.connect(
+        safe_dsn,
+        row_factory=dict_row,
+        connect_timeout=PG_CONNECT_TIMEOUT,
+    )
     try:
         yield conn
     finally:
@@ -229,41 +260,39 @@ def _open_sqlite_app_state(path: Path) -> _SqliteConnWrapper:
 
 def _app_state_schema_for_conn(override_dsn: str | None) -> str:
     """Return 'sqlite' or 'postgres' so app_state_table() resolves correctly before opening conn."""
-    # Env sqlite must win over Navixy userDbUrl — same order as get_app_state_conn().
-    if _use_sqlite_app_state():
+    if request_uses_sqlite_app_state(override_dsn):
         return "sqlite"
-    if override_dsn:
-        return "postgres"
-    return "sqlite"
+    return "postgres"
 
 
 @contextmanager
 def get_app_state_conn(main_dsn: str, override_dsn: str | None = None) -> Generator[Any, None, None]:
     """
-    Context manager for app_sensoriqua (configured_sensors, dashboard_planes).
-    If SENSORIQUA_APP_STATE_DSN is set to sqlite, uses that (overrides Navixy userDbUrl).
-    Else if override_dsn is set (e.g. Navixy userDbUrl), uses that Postgres for app state.
-    Otherwise uses default SQLite at backend/sensoriqua_state.db (no Postgres schema required).
-    Yields a connection with execute(sql, params) and dict rows.
-    Table names: SQLite no prefix; Postgres use app_sensoriqua.X (via app_state_table).
+    Context manager for configured_sensors / dashboard_planes.
+
+    Priority:
+    1. SENSORIQUA_APP_STATE_DSN=sqlite://... → that SQLite file
+    2. SENSORIQUA_USE_USER_DB_APP_STATE=1 + Navixy userDbUrl → Postgres app_sensoriqua
+    3. Otherwise → default SQLite at backend/sensoriqua_state.db
+
+    Navixy userDbUrl is ignored by default so App Connect on Render does not hang or 503
+    when the user DB has no app_sensoriqua schema / is unreachable from the web service.
     """
     schema = _app_state_schema_for_conn(override_dsn)
     token = _app_state_schema.set(schema)
     try:
         if _use_sqlite_app_state():
-            path = _sqlite_path()
-            if path:
-                conn_wrapper = _open_sqlite_app_state(path)
-                try:
-                    yield conn_wrapper
-                finally:
-                    conn_wrapper.close()
-                return
-        if override_dsn:
-            with get_conn(override_dsn) as conn:
+            path = _sqlite_path() or _DEFAULT_APP_STATE_PATH
+            conn_wrapper = _open_sqlite_app_state(path)
+            try:
+                yield conn_wrapper
+            finally:
+                conn_wrapper.close()
+            return
+        if _should_use_navixy_user_db(override_dsn):
+            with get_conn(override_dsn) as conn:  # type: ignore[arg-type]
                 yield conn
             return
-        # No override and no APP_STATE_DSN: use default SQLite so app works without app_sensoriqua on main DB
         conn_wrapper = _open_sqlite_app_state(_DEFAULT_APP_STATE_PATH)
         try:
             yield conn_wrapper
@@ -274,8 +303,8 @@ def get_app_state_conn(main_dsn: str, override_dsn: str | None = None) -> Genera
 
 
 def app_state_uses_sqlite() -> bool:
-    """True if env forces SQLite or no APP_STATE_DSN (default local SQLite file)."""
-    return _use_sqlite_app_state() or not APP_STATE_DSN
+    """True when this process prefers SQLite for app state (typical Render / local setup)."""
+    return not USE_USER_DB_APP_STATE or _use_sqlite_app_state() or not APP_STATE_DSN
 
 
 def app_state_table(name: str) -> str:

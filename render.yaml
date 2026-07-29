@@ -24,9 +24,12 @@ services:
       # Required behind Render's reverse proxy so login rate limits use the real client IP
       - key: TRUST_PROXY
         value: "1"
-      # Use SQLite for app state so configured_sensors/dashboard work without app_sensoriqua schema in Postgres
+      # Use SQLite for app state so configured_sensors/dashboard work without app_sensoriqua in Navixy user DB.
+      # Do NOT set SENSORIQUA_USE_USER_DB_APP_STATE unless userDbUrl has app_sensoriqua migrations.
       - key: SENSORIQUA_APP_STATE_DSN
         value: "sqlite:///sensoriqua_state.db"
+      - key: SENSORIQUA_PG_CONNECT_TIMEOUT
+        value: "8"
       # Public deploys must require JWT (Navixy App Connect). Set JWT_SECRET in the dashboard.
       - key: REQUIRE_AUTH
         value: "1"
@@ -36,4 +39,5 @@ services:
       # CORS_ORIGINS — your Render URL, e.g. https://sensoriqua.onrender.com
       # ALLOW_PRIVATE_DSN=1 — only if Navixy iotDbUrl/userDbUrl point at private IPs
       # Do NOT set ALLOW_CLIENT_DSN / ALLOW_CLIENT_USER_ID on public internet
+      # Do NOT set SENSORIQUA_USE_USER_DB_APP_STATE=1 on Render unless app_sensoriqua exists in userDbUrl
       # SENSORIQUA_DSN — standalone only; incompatible with REQUIRE_AUTH=1 unless JWT is also configured
